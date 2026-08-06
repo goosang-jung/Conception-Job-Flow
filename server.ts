@@ -74,6 +74,10 @@ interface Attachment {
   uploadedAt: string
   tag?: 'quote' | 'receipt' | 'inspection' | 'meeting' | 'siteVideo' | 'deliverable' | 'other'
   note?: string
+  submissionStatus?: 'pending' | 'submitted'
+  submittedAt?: string
+  submittedBy?: string
+  submissionMemo?: string
   history?: EvidenceHistory[]
 }
 
@@ -432,6 +436,7 @@ app.post('/uploads', requireAdmin, (req, res) => {
     size: buffer.length,
     tag: 'other',
     note: '',
+    submissionStatus: 'pending',
     history: [{ id: uuidv4(), action: 'uploaded', actor: '관리자', createdAt: new Date().toISOString(), memo: safeName }],
     uploadedAt: new Date().toISOString(),
   }
@@ -449,9 +454,14 @@ app.patch('/tasks/:taskId/attachments/:attachmentId', requireAdmin, (req, res) =
     if (attachment.id !== attachmentId) return attachment
     const tag = typeof req.body?.tag === 'string' && allowedTags.has(req.body.tag) ? req.body.tag : attachment.tag
     const note = typeof req.body?.note === 'string' ? req.body.note.slice(0, 300) : attachment.note
-    const changedAction = tag !== attachment.tag ? 'tagged' : note !== attachment.note ? 'noted' : null
-    const history = changedAction ? [...(attachment.history || []), { id: uuidv4(), action: changedAction, actor: '관리자', createdAt: new Date().toISOString(), memo: changedAction === 'tagged' ? String(tag || '') : String(note || '') }] : attachment.history
-    return { ...attachment, tag, note, history }
+    const submissionStatus = req.body?.submissionStatus === 'submitted' || req.body?.submissionStatus === 'pending' ? req.body.submissionStatus : attachment.submissionStatus
+    const submittedAt = typeof req.body?.submittedAt === 'string' ? req.body.submittedAt : attachment.submittedAt
+    const submittedBy = typeof req.body?.submittedBy === 'string' ? req.body.submittedBy.slice(0, 80) : attachment.submittedBy
+    const submissionMemo = typeof req.body?.submissionMemo === 'string' ? req.body.submissionMemo.slice(0, 300) : attachment.submissionMemo
+    const changedAction = tag !== attachment.tag ? 'tagged' : note !== attachment.note ? 'noted' : submissionStatus !== attachment.submissionStatus ? 'submitted' : null
+    const historyMemo = changedAction === 'tagged' ? String(tag || '') : changedAction === 'submitted' ? String(submissionMemo || submissionStatus || '') : String(note || '')
+    const history = changedAction ? [...(attachment.history || []), { id: uuidv4(), action: changedAction, actor: '관리자', createdAt: new Date().toISOString(), memo: historyMemo }] : attachment.history
+    return { ...attachment, tag, note, submissionStatus, submittedAt, submittedBy, submissionMemo, history }
   })
 
   if (!attachments.some(attachment => attachment.id === attachmentId)) return res.status(404).json({ error: 'Attachment not found' })

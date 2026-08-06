@@ -52,6 +52,10 @@ interface Attachment {
   uploadedAt: string
   tag?: AttachmentTag
   note?: string
+  submissionStatus?: 'pending' | 'submitted'
+  submittedAt?: string
+  submittedBy?: string
+  submissionMemo?: string
   history?: EvidenceHistory[]
 }
 
@@ -304,7 +308,7 @@ export default function GovProjectDashboard() {
     setAttachments(prev => prev.map(attachment => attachment.id === id ? { ...attachment, ...patch } : attachment))
   }
 
-  const updateTaskAttachment = async (task: Task, attachmentId: string, patch: Partial<Pick<Attachment, 'tag' | 'note'>>) => {
+  const updateTaskAttachment = async (task: Task, attachmentId: string, patch: Partial<Pick<Attachment, 'tag' | 'note' | 'submissionStatus' | 'submittedAt' | 'submittedBy' | 'submissionMemo'>>) => {
     try {
       const res = await request(`/tasks/${task.id}/attachments/${attachmentId}`, {
         method: 'PATCH',
@@ -980,11 +984,14 @@ export default function GovProjectDashboard() {
     const tags = new Set(taskAttachments.map(attachment => attachment.tag || 'other'))
     const hasRequiredTag = ['quote', 'receipt', 'inspection', 'deliverable'].some(tag => tags.has(tag as AttachmentTag))
     const hasMemo = taskAttachments.some(attachment => (attachment.note || '').trim().length > 0)
-    const readyScore = Math.round(((taskAttachments.length ? 35 : 0) + (hasRequiredTag ? 35 : 0) + (hasMemo ? 20 : 0) + (task.approvalStage === 'paid' ? 10 : 0)))
-    return { task, taskAttachments, tags, hasRequiredTag, hasMemo, readyScore }
+    const submittedCount = taskAttachments.filter(attachment => attachment.submissionStatus === 'submitted').length
+    const allSubmitted = taskAttachments.length > 0 && submittedCount === taskAttachments.length
+    const readyScore = Math.round(((taskAttachments.length ? 25 : 0) + (hasRequiredTag ? 25 : 0) + (hasMemo ? 20 : 0) + (task.approvalStage === 'paid' ? 10 : 0) + (allSubmitted ? 20 : 0)))
+    return { task, taskAttachments, tags, hasRequiredTag, hasMemo, submittedCount, allSubmitted, readyScore }
   })
   const evidenceReadyForSubmission = evidenceSubmissionRows.filter(row => row.readyScore >= 70).length
   const evidenceSubmissionRate = evidenceSubmissionRows.length ? Math.round((evidenceReadyForSubmission / evidenceSubmissionRows.length) * 100) : 0
+  const submittedEvidenceCount = evidenceItems.filter(({ attachment }) => attachment.submissionStatus === 'submitted').length
   const evidenceTagReadiness = ATTACHMENT_TAGS.filter(tag => tag.id !== 'other').map(tag => {
     const count = evidenceItems.filter(({ attachment }) => attachment.tag === tag.id).length
     return { ...tag, count, rate: evidenceItems.length ? Math.round((count / evidenceItems.length) * 100) : 0 }
@@ -998,6 +1005,10 @@ export default function GovProjectDashboard() {
     유형: attachment.type === 'image' ? '이미지' : '동영상',
     용량MB: Math.round(attachment.size / 1024 / 1024 * 10) / 10,
     업로드일: new Date(attachment.uploadedAt).toLocaleString('ko-KR'),
+    제출상태: attachment.submissionStatus === 'submitted' ? '제출완료' : '미제출',
+    제출일: attachment.submittedAt ? new Date(attachment.submittedAt).toLocaleString('ko-KR') : '',
+    제출자: attachment.submittedBy || '',
+    제출메모: attachment.submissionMemo || '',
     메모: attachment.note || '',
     URL: mediaUrl(attachment.url),
   }))
@@ -2173,7 +2184,10 @@ export default function GovProjectDashboard() {
                               <h4 className="truncate text-sm font-bold text-slate-900">{attachment.name}</h4>
                               <p className="mt-1 truncate text-xs text-slate-500">{task.name} · {task.assignee || '미배정'}</p>
                             </div>
-                            <span className="shrink-0 rounded-full bg-white px-2 py-1 text-[11px] font-bold text-teal-700">{ATTACHMENT_TAGS.find(tag => tag.id === (attachment.tag || 'other'))?.label}</span>
+                            <div className="shrink-0 space-y-1 text-right">
+                              <span className="block rounded-full bg-white px-2 py-1 text-[11px] font-bold text-teal-700">{ATTACHMENT_TAGS.find(tag => tag.id === (attachment.tag || 'other'))?.label}</span>
+                              <span className={`block rounded-full px-2 py-1 text-[11px] font-bold ${attachment.submissionStatus === 'submitted' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}>{attachment.submissionStatus === 'submitted' ? '제출완료' : '미제출'}</span>
+                            </div>
                           </div>
                           {attachment.note && <p className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600">{attachment.note}</p>}
                           <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
@@ -2212,7 +2226,7 @@ export default function GovProjectDashboard() {
                 <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">제출 준비율</div><div className="text-xl font-bold text-teal-700">{evidenceSubmissionRate}%</div></div>
                 <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">준비 완료</div><div className="text-xl font-bold text-slate-900">{evidenceReadyForSubmission}</div><div className="text-xs text-slate-400">업무</div></div>
                 <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">체크 대상</div><div className="text-xl font-bold text-amber-700">{evidenceSubmissionRows.length}</div><div className="text-xs text-slate-400">예산 업무</div></div>
-                <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">변경 이력 구조</div><div className="text-xl font-bold text-indigo-700">준비</div><div className="text-xs text-slate-400">history 필드</div></div>
+                <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">제출 완료</div><div className="text-xl font-bold text-indigo-700">{submittedEvidenceCount}</div><div className="text-xs text-slate-400">증빙</div></div>
               </div>
               <div className="mt-5 grid grid-cols-1 xl:grid-cols-3 gap-4">
                 <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
@@ -2243,7 +2257,29 @@ export default function GovProjectDashboard() {
                           <span className={`rounded-lg px-2 py-1 ${row.hasRequiredTag ? 'bg-teal-50 text-teal-700' : 'bg-amber-50 text-amber-700'}`}>필수 태그 {row.hasRequiredTag ? '확인' : '필요'}</span>
                           <span className={`rounded-lg px-2 py-1 ${row.hasMemo ? 'bg-teal-50 text-teal-700' : 'bg-amber-50 text-amber-700'}`}>메모 {row.hasMemo ? '작성' : '필요'}</span>
                           <span className={`rounded-lg px-2 py-1 ${row.task.approvalStage === 'paid' ? 'bg-teal-50 text-teal-700' : 'bg-slate-100 text-slate-600'}`}>집행 {row.task.approvalStage === 'paid' ? '완료' : '대기'}</span>
+                          <span className={`col-span-2 rounded-lg px-2 py-1 ${row.allSubmitted ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}>제출 {row.submittedCount}/{row.taskAttachments.length}개</span>
                         </div>
+                        {isAdmin && row.taskAttachments.length > 0 && (
+                          <div className="mt-3 space-y-2">
+                            {row.taskAttachments.slice(0, 3).map(attachment => (
+                              <div key={attachment.id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-100 bg-slate-50 px-2 py-2">
+                                <span className="min-w-0 truncate text-slate-600">{attachment.name}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => void updateTaskAttachment(row.task, attachment.id, {
+                                    submissionStatus: attachment.submissionStatus === 'submitted' ? 'pending' : 'submitted',
+                                    submittedAt: attachment.submissionStatus === 'submitted' ? '' : new Date().toISOString(),
+                                    submittedBy: attachment.submissionStatus === 'submitted' ? '' : '관리자',
+                                    submissionMemo: attachment.submissionStatus === 'submitted' ? '' : '감사 제출 패키지 포함',
+                                  })}
+                                  className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-bold ${attachment.submissionStatus === 'submitted' ? 'bg-indigo-100 text-indigo-700' : 'bg-white text-slate-600 border border-slate-200'}`}
+                                >
+                                  {attachment.submissionStatus === 'submitted' ? '제출완료' : '제출처리'}
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </article>
                     ))}
                     {evidenceSubmissionRows.length === 0 && <div className="md:col-span-2 rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">체크할 예산 업무가 없습니다.</div>}
