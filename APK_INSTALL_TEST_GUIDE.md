@@ -101,6 +101,7 @@ Android 보안 설정 예시:
 
 - APK 앱이 로컬 서버 `localhost:3002`에 연결되는 구조라면, 휴대폰에서는 PC의 `localhost`가 보이지 않는다.
 - 실제 휴대폰에서 서버 기능까지 테스트하려면 PC 서버를 같은 Wi-Fi에서 접근 가능한 IP로 열거나, 공개 서버에 배포해야 한다.
+- 같은 Wi‑Fi 실기기 서버 연결 절차는 `MOBILE_DEVICE_SERVER_TEST.md`를 따른다.
 
 ## 9. 문제 기록 양식
 

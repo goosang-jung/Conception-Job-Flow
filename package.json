@@ -7,13 +7,19 @@
     "dev": "concurrently \"npm run server\" \"vite\"",
     "server": "tsx server.ts",
     "build": "tsc && vite build",
+    "build:mobile": "tsc && vite build --mode mobile",
     "preview": "vite preview",
     "start": "tsx server.ts",
+    "start:lan": "powershell -ExecutionPolicy Bypass -Command \"$env:HOST='0.0.0.0'; $env:PORT='3002'; npm run start\"",
     "app:sync": "npm run build && cap sync android",
+    "app:sync:mobile": "npm run build:mobile && cap sync android",
     "app:open": "cap open android",
     "app:build": "npm run app:sync && cd android && gradlew assembleDebug",
+    "app:build:mobile": "npm run app:sync:mobile && cd android && gradlew assembleDebug",
     "app:release:apk": "npm run app:sync && cd android && gradlew assembleRelease",
-    "app:release:aab": "npm run app:sync && cd android && gradlew bundleRelease"
+    "app:release:apk:mobile": "npm run app:sync:mobile && cd android && gradlew assembleRelease",
+    "app:release:aab": "npm run app:sync && cd android && gradlew bundleRelease",
+    "app:release:aab:mobile": "npm run app:sync:mobile && cd android && gradlew bundleRelease"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",

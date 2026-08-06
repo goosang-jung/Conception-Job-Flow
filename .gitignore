@@ -13,6 +13,7 @@ uploads/
 
 # Environment and secrets
 .env
+.env.mobile
 .env.local
 .env.*.local
 *.jks

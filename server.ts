@@ -771,6 +771,11 @@ if (fs.existsSync(distDir)) {
 }
 
 const PORT = Number(process.env.PORT || 3002)
-app.listen(PORT, () => {
-  console.log(`✅ Conception Job Flow: http://localhost:${PORT}`)
+const HOST = process.env.HOST || 'localhost'
+app.listen(PORT, HOST, () => {
+  const displayHost = HOST === '0.0.0.0' ? 'localhost' : HOST
+  console.log(`✅ Conception Job Flow: http://${displayHost}:${PORT}`)
+  if (HOST === '0.0.0.0') {
+    console.log(`📱 Mobile LAN test: use http://<PC_LOCAL_IP>:${PORT}`)
+  }
 })
