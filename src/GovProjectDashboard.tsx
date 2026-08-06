@@ -15,12 +15,25 @@ interface Task {
   cashAmount?: number
   inKindAmount?: number
   approvalStage?: 'draft' | 'requested' | 'approved' | 'paid' | 'rejected'
+  approvalMemo?: string
+  rejectionReason?: string
+  approvedBy?: string
+  approvedAt?: string
+  approvalHistory?: ApprovalHistory[]
   createdAt: string
   status: 'pending' | 'in-progress' | 'review' | 'blocked' | 'completed'
   attachments?: Attachment[]
 }
 
 type BudgetCategory = 'labor' | 'materials' | 'activity' | 'international' | 'outsourcing' | 'incentive' | 'indirect'
+
+interface ApprovalHistory {
+  id: string
+  stage: NonNullable<Task['approvalStage']>
+  memo?: string
+  actor: string
+  createdAt: string
+}
 
 interface Attachment {
   id: string
@@ -117,6 +130,7 @@ export default function GovProjectDashboard() {
     amount: number
     approvalStage: NonNullable<Task['approvalStage']>
   }>({ budgetCategory: 'labor', cashAmount: 0, inKindAmount: 0, amount: 0, approvalStage: 'requested' })
+  const [approvalNotes, setApprovalNotes] = useState<Record<string, string>>({})
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [uploadingAttachment, setUploadingAttachment] = useState(false)
@@ -520,15 +534,31 @@ export default function GovProjectDashboard() {
     }
   }
 
-  const handleApprovalStageChange = async (id: string, approvalStage: NonNullable<Task['approvalStage']>) => {
+  const handleApprovalStageChange = async (task: Task, approvalStage: NonNullable<Task['approvalStage']>) => {
     try {
-      const res = await request(`/tasks/${id}`, {
+      const memo = (approvalNotes[task.id] || '').trim()
+      const historyEntry: ApprovalHistory = {
+        id: `${Date.now()}-${approvalStage}`,
+        stage: approvalStage,
+        memo,
+        actor: '관리자',
+        createdAt: new Date().toISOString(),
+      }
+      const res = await request(`/tasks/${task.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ approvalStage }),
+        body: JSON.stringify({
+          approvalStage,
+          approvalMemo: approvalStage === 'approved' || approvalStage === 'paid' ? memo : task.approvalMemo,
+          rejectionReason: approvalStage === 'rejected' ? memo : task.rejectionReason,
+          approvedBy: approvalStage === 'approved' || approvalStage === 'paid' ? '관리자' : task.approvedBy,
+          approvedAt: approvalStage === 'approved' || approvalStage === 'paid' ? new Date().toISOString() : task.approvedAt,
+          approvalHistory: [...(task.approvalHistory || []), historyEntry],
+        }),
       })
       const updated = await res.json()
-      setTasks(prev => prev.map(task => (task.id === id ? updated : task)))
+      setTasks(prev => prev.map(item => (item.id === task.id ? updated : item)))
+      setApprovalNotes(prev => ({ ...prev, [task.id]: '' }))
       setNotice(`결재 단계가 ${BUDGET_APPROVAL_LABELS[approvalStage]} 상태로 변경되었습니다.`)
     } catch {
       setError('결재 단계를 변경하지 못했습니다.')
@@ -1478,12 +1508,36 @@ export default function GovProjectDashboard() {
                         <div className="rounded-lg bg-white p-2"><span className="block text-slate-400">마감</span><strong>{new Date(task.deadline).toLocaleDateString('ko-KR')}</strong></div>
                         <div className="rounded-lg bg-white p-2"><span className="block text-slate-400">증빙</span><strong>{task.attachments?.length || 0}개</strong></div>
                       </div>
+                      {(task.approvalMemo || task.rejectionReason || task.approvalHistory?.length) && (
+                        <div className="mt-3 rounded-lg border border-slate-100 bg-white p-3 text-xs text-slate-600">
+                          {task.rejectionReason && <p><strong className="text-red-700">반려 사유</strong> · {task.rejectionReason}</p>}
+                          {task.approvalMemo && <p><strong className="text-teal-700">승인 메모</strong> · {task.approvalMemo}</p>}
+                          {task.approvalHistory?.length ? (
+                            <p className="mt-1 text-slate-400">
+                              최근 이력 · {BUDGET_APPROVAL_LABELS[task.approvalHistory[task.approvalHistory.length - 1].stage]} · {new Date(task.approvalHistory[task.approvalHistory.length - 1].createdAt).toLocaleString('ko-KR')}
+                            </p>
+                          ) : null}
+                        </div>
+                      )}
                       {isAdmin && (
-                        <div className="mt-3 grid grid-cols-2 gap-2">
-                          <button type="button" onClick={() => handleApprovalStageChange(task.id, 'approved')} className="rounded-lg bg-teal-700 px-3 py-2 text-xs font-semibold text-white">승인</button>
-                          <button type="button" onClick={() => handleApprovalStageChange(task.id, 'rejected')} className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">반려</button>
-                          <button type="button" onClick={() => handleApprovalStageChange(task.id, 'paid')} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white">집행완료</button>
-                          <button type="button" onClick={() => { navigateToView('table'); startBudgetEdit(task) }} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-700 border border-slate-200">예산수정</button>
+                        <div className="mt-3 space-y-2">
+                          <label className="block text-xs font-semibold text-slate-500">
+                            승인 메모 / 반려 사유
+                            <textarea
+                              aria-label={`${task.name} 결재 메모`}
+                              value={approvalNotes[task.id] || ''}
+                              onChange={event => setApprovalNotes(prev => ({ ...prev, [task.id]: event.target.value }))}
+                              placeholder="검토 의견, 승인 조건, 반려 사유를 남기세요."
+                              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                              rows={2}
+                            />
+                          </label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button type="button" onClick={() => handleApprovalStageChange(task, 'approved')} className="rounded-lg bg-teal-700 px-3 py-2 text-xs font-semibold text-white">승인</button>
+                            <button type="button" onClick={() => handleApprovalStageChange(task, 'rejected')} className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">반려</button>
+                            <button type="button" onClick={() => handleApprovalStageChange(task, 'paid')} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white">집행완료</button>
+                            <button type="button" onClick={() => { navigateToView('table'); startBudgetEdit(task) }} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-700 border border-slate-200">예산수정</button>
+                          </div>
                         </div>
                       )}
                     </article>

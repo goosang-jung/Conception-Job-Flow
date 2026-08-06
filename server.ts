@@ -42,9 +42,22 @@ interface Task {
   cashAmount?: number
   inKindAmount?: number
   approvalStage?: 'draft' | 'requested' | 'approved' | 'paid' | 'rejected'
+  approvalMemo?: string
+  rejectionReason?: string
+  approvedBy?: string
+  approvedAt?: string
+  approvalHistory?: ApprovalHistory[]
   createdAt: string
   status: 'pending' | 'in-progress' | 'review' | 'blocked' | 'completed'
   attachments?: Attachment[]
+}
+
+interface ApprovalHistory {
+  id: string
+  stage: 'draft' | 'requested' | 'approved' | 'paid' | 'rejected'
+  memo?: string
+  actor: string
+  createdAt: string
 }
 
 interface Attachment {
