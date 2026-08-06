@@ -103,6 +103,7 @@ const BUDGET_CATEGORIES: Array<{ id: BudgetCategory; label: string; description:
 ]
 
 const BUDGET_APPROVAL_LABELS = { draft: '작성', requested: '결재요청', approved: '승인', paid: '집행완료', rejected: '반려' } as const
+const APPROVAL_STAGE_ORDER: Array<NonNullable<Task['approvalStage']>> = ['draft', 'requested', 'approved', 'paid', 'rejected']
 
 const ATTACHMENT_TAGS: Array<{ id: AttachmentTag; label: string }> = [
   { id: 'quote', label: '견적서' },
@@ -145,6 +146,7 @@ export default function GovProjectDashboard() {
     approvalStage: NonNullable<Task['approvalStage']>
   }>({ budgetCategory: 'labor', cashAmount: 0, inKindAmount: 0, amount: 0, approvalStage: 'requested' })
   const [approvalNotes, setApprovalNotes] = useState<Record<string, string>>({})
+  const [approvalFilter, setApprovalFilter] = useState<'all' | NonNullable<Task['approvalStage']>>('all')
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [uploadingAttachment, setUploadingAttachment] = useState(false)
@@ -801,7 +803,20 @@ export default function GovProjectDashboard() {
       const stageWeight = { requested: 0, rejected: 1, draft: 2, approved: 3, paid: 4 } as Record<NonNullable<Task['approvalStage']>, number>
       return (stageWeight[a.approvalStage || 'requested'] - stageWeight[b.approvalStage || 'requested']) || a.deadline.localeCompare(b.deadline)
     })
+  const approvalStageCounts = APPROVAL_STAGE_ORDER.reduce((acc, stage) => {
+    acc[stage] = budgetedTasks.filter(task => (task.approvalStage || 'requested') === stage).length
+    return acc
+  }, {} as Record<NonNullable<Task['approvalStage']>, number>)
+  const approvalFilteredTasks = budgetedTasks
+    .filter(task => approvalFilter === 'all' || (task.approvalStage || 'requested') === approvalFilter)
+    .sort((a, b) => {
+      const stageWeight = { requested: 0, rejected: 1, draft: 2, approved: 3, paid: 4 } as Record<NonNullable<Task['approvalStage']>, number>
+      return (stageWeight[a.approvalStage || 'requested'] - stageWeight[b.approvalStage || 'requested']) || a.deadline.localeCompare(b.deadline)
+    })
   const approvalReadyCount = approvalQueueTasks.filter(task => (task.attachments?.length || 0) > 0).length
+  const rejectedApprovalCount = approvalStageCounts.rejected || 0
+  const evidenceMissingApprovalCount = approvalQueueTasks.filter(task => !(task.attachments?.length)).length
+  const approvalBottleneckAmount = approvalQueueTasks.reduce((sum, task) => sum + (task.cashAmount ?? task.amount ?? 0) + (task.inKindAmount || 0), 0)
   const paidBudgetAmount = budgetedTasks.filter(task => (task.approvalStage || '') === 'paid').reduce((sum, task) => sum + (task.cashAmount ?? task.amount ?? 0) + (task.inKindAmount || 0), 0)
   const evidenceReadyCount = budgetedTasks.filter(task => task.attachments?.length).length
   const aiBudgetAlerts = [
@@ -1583,31 +1598,41 @@ export default function GovProjectDashboard() {
               <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
                 <div>
                   <p className="text-xs font-semibold text-amber-700">APPROVAL CONTROL</p>
-                  <h3 className="text-xl font-bold text-slate-900 mt-1">결재 대기 패널</h3>
-                  <p className="text-sm text-slate-500 mt-2">결재요청, 반려, 작성 상태의 예산 항목만 모아 승인 병목과 증빙 준비 상태를 빠르게 판단합니다.</p>
+                  <h3 className="text-xl font-bold text-slate-900 mt-1">결재 관제 패널</h3>
+                  <p className="text-sm text-slate-500 mt-2">작성부터 집행완료까지 단계별로 필터링하고, 반려 사유·승인 메모·결재 이력을 한 화면에서 추적합니다.</p>
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-center min-w-full lg:min-w-[360px]">
-                  <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">처리 대상</div><div className="text-xl font-bold text-amber-700">{approvalQueueTasks.length}</div></div>
-                  <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">증빙 준비</div><div className="text-xl font-bold text-teal-700">{approvalReadyCount}</div></div>
-                  <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">증빙 누락</div><div className="text-xl font-bold text-red-700">{Math.max(approvalQueueTasks.length - approvalReadyCount, 0)}</div></div>
+                  <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">병목 금액</div><div className="text-xl font-bold text-amber-700">{approvalBottleneckAmount}만원</div></div>
+                  <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">반려</div><div className="text-xl font-bold text-red-700">{rejectedApprovalCount}</div></div>
+                  <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">증빙 누락</div><div className="text-xl font-bold text-red-700">{evidenceMissingApprovalCount}</div></div>
                 </div>
               </div>
+              <div className="mt-5 flex flex-wrap gap-2">
+                <button type="button" onClick={() => setApprovalFilter('all')} className={`rounded-full px-3 py-2 text-xs font-bold transition ${approvalFilter === 'all' ? 'bg-slate-900 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>전체 {budgetedTasks.length}</button>
+                {APPROVAL_STAGE_ORDER.map(stage => (
+                  <button key={stage} type="button" onClick={() => setApprovalFilter(stage)} className={`rounded-full px-3 py-2 text-xs font-bold transition ${approvalFilter === stage ? 'bg-slate-900 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                    {BUDGET_APPROVAL_LABELS[stage]} {approvalStageCounts[stage] || 0}
+                  </button>
+                ))}
+              </div>
               <div className="mt-5 grid grid-cols-1 xl:grid-cols-3 gap-3">
-                {approvalQueueTasks.slice(0, 6).map(task => {
+                {approvalFilteredTasks.slice(0, 9).map(task => {
                   const taskBudgetTotal = (task.cashAmount ?? task.amount ?? 0) + (task.inKindAmount || 0)
+                  const history = task.approvalHistory || []
+                  const currentStage = task.approvalStage || 'requested'
                   return (
-                    <article key={task.id} className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                    <article key={task.id} className={`rounded-xl border p-4 ${currentStage === 'rejected' ? 'border-red-200 bg-red-50/80' : currentStage === 'paid' ? 'border-teal-200 bg-teal-50/70' : 'border-slate-200 bg-slate-50/80'}`}>
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <h4 className="font-bold text-slate-900 truncate">{task.name}</h4>
                           <p className="text-xs text-slate-500 mt-1">{task.assignee || '미배정'} · {BUDGET_CATEGORIES.find(category => category.id === (task.budgetCategory || 'activity'))?.label}</p>
                         </div>
-                        <span className="shrink-0 rounded-full bg-white px-2 py-1 text-xs font-semibold text-amber-700">{BUDGET_APPROVAL_LABELS[task.approvalStage || 'requested']}</span>
+                        <span className="shrink-0 rounded-full bg-white px-2 py-1 text-xs font-semibold text-amber-700">{BUDGET_APPROVAL_LABELS[currentStage]}</span>
                       </div>
                       <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
                         <div className="rounded-lg bg-white p-2"><span className="block text-slate-400">금액</span><strong>{taskBudgetTotal}만원</strong></div>
                         <div className="rounded-lg bg-white p-2"><span className="block text-slate-400">마감</span><strong>{new Date(task.deadline).toLocaleDateString('ko-KR')}</strong></div>
-                        <div className="rounded-lg bg-white p-2"><span className="block text-slate-400">증빙</span><strong>{task.attachments?.length || 0}개</strong></div>
+                        <div className={`rounded-lg p-2 ${(task.attachments?.length || 0) > 0 ? 'bg-white' : 'bg-red-100 text-red-700'}`}><span className="block text-slate-400">증빙</span><strong>{task.attachments?.length || 0}개</strong></div>
                       </div>
                       {(task.approvalMemo || task.rejectionReason || task.approvalHistory?.length) && (
                         <div className="mt-3 rounded-lg border border-slate-100 bg-white p-3 text-xs text-slate-600">
@@ -1620,6 +1645,25 @@ export default function GovProjectDashboard() {
                           ) : null}
                         </div>
                       )}
+                      <div className="mt-3 rounded-lg border border-slate-100 bg-white p-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-700">결재 이력 상세</span>
+                          <span className="text-[11px] text-slate-400">{history.length}건</span>
+                        </div>
+                        {history.length ? (
+                          <ol className="mt-2 space-y-2">
+                            {history.slice(-4).reverse().map(item => (
+                              <li key={item.id} className="border-l-2 border-slate-200 pl-3 text-xs">
+                                <div className="font-bold text-slate-700">{BUDGET_APPROVAL_LABELS[item.stage]} · {item.actor}</div>
+                                <div className="text-slate-400">{new Date(item.createdAt).toLocaleString('ko-KR')}</div>
+                                {item.memo && <div className="mt-1 text-slate-600">{item.memo}</div>}
+                              </li>
+                            ))}
+                          </ol>
+                        ) : (
+                          <p className="mt-2 text-xs text-slate-400">아직 기록된 결재 이력이 없습니다.</p>
+                        )}
+                      </div>
                       {isAdmin && (
                         <div className="mt-3 space-y-2">
                           <label className="block text-xs font-semibold text-slate-500">
@@ -1637,14 +1681,16 @@ export default function GovProjectDashboard() {
                             <button type="button" onClick={() => handleApprovalStageChange(task, 'approved')} className="rounded-lg bg-teal-700 px-3 py-2 text-xs font-semibold text-white">승인</button>
                             <button type="button" onClick={() => handleApprovalStageChange(task, 'rejected')} className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">반려</button>
                             <button type="button" onClick={() => handleApprovalStageChange(task, 'paid')} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white">집행완료</button>
-                            <button type="button" onClick={() => { navigateToView('table'); startBudgetEdit(task) }} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-700 border border-slate-200">예산수정</button>
+                            {currentStage === 'rejected'
+                              ? <button type="button" onClick={() => handleApprovalStageChange(task, 'requested')} className="rounded-lg bg-amber-100 px-3 py-2 text-xs font-semibold text-amber-800">재요청</button>
+                              : <button type="button" onClick={() => { navigateToView('table'); startBudgetEdit(task) }} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-700 border border-slate-200">예산수정</button>}
                           </div>
                         </div>
                       )}
                     </article>
                   )
                 })}
-                {approvalQueueTasks.length === 0 && <div className="xl:col-span-3 rounded-xl border border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">현재 결재 대기 항목이 없습니다.</div>}
+                {approvalFilteredTasks.length === 0 && <div className="xl:col-span-3 rounded-xl border border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">선택한 결재 단계의 항목이 없습니다.</div>}
               </div>
             </section>
 
