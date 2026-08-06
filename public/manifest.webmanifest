@@ -1,0 +1,16 @@
+{
+  "name": "Conception Job Flow",
+  "short_name": "Job Flow",
+  "description": "업무, 연차, 일정, 출장과 개인 실적을 통합 관리하는 조직 업무 앱",
+  "lang": "ko-KR",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f172a",
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

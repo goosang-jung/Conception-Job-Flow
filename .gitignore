@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+coverage/
+
+# Local runtime data
+data/
+uploads/
+*.log
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+
+# Android generated files
+android/.gradle/
+android/build/
+android/app/build/
+android/**/build/
+android/local.properties
+
+# IDE / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local assistant/tooling scratch
+.claude/

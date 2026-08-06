@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Conception Job Flow</string>
+    <string name="title_activity_main">Conception Job Flow</string>
+    <string name="package_name">com.conception.jobflow</string>
+    <string name="custom_url_scheme">com.conception.jobflow</string>
+</resources>
