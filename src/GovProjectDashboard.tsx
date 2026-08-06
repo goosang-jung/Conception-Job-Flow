@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import JSZip from 'jszip'
 import { Activity, Award, BookOpenCheck, BriefcaseBusiness, CalendarDays, CheckCircle2, Clock3, Landmark, LayoutDashboard, Lightbulb, ListTodo, Search, ShieldCheck, TriangleAlert, Users, WalletCards } from 'lucide-react'
 
 interface Task {
@@ -368,6 +369,49 @@ export default function GovProjectDashboard() {
     link.click()
     URL.revokeObjectURL(url)
     setNotice(`${fileName} 파일을 생성했습니다.`)
+  }
+
+  const downloadEvidenceZip = async () => {
+    if (!evidencePackageManifest.files.length) {
+      setNotice('ZIP에 포함할 증빙 파일이 없습니다.')
+      return
+    }
+    try {
+      setNotice('증빙 ZIP 파일을 생성하는 중입니다. 파일 수와 용량에 따라 시간이 걸릴 수 있습니다.')
+      const zip = new JSZip()
+      zip.file('00_제출표지/README.txt', [
+        submissionPackageTitle,
+        `기관명: ${submissionOrganization}`,
+        `과제명: ${submissionProjectName}`,
+        `제출자: ${submissionOwner}`,
+        `대상 기간: ${submissionStartDate} ~ ${submissionEndDate}`,
+        `생성일: ${todayKey}`,
+        `전체 증빙: ${evidenceItems.length}`,
+        `제출 완료: ${submittedEvidenceCount}`,
+        `미제출: ${unsubmittedEvidenceCount}`,
+      ].join('\n'))
+      zip.file('01_증빙목록/manifest.json', JSON.stringify(evidencePackageManifest, null, 2))
+      const csvRows = evidencePackageManifest.files.map(file => `${file.order},"${file.taskName.replace(/"/g, '""')}","${file.assignee.replace(/"/g, '""')}","${file.tag}","${file.submissionStatus}","${file.targetPath.replace(/"/g, '""')}","${file.sourceUrl.replace(/"/g, '""')}"`)
+      zip.file('01_증빙목록/files.csv', `순번,업무명,담당자,태그,제출상태,저장경로,원본URL\n${csvRows.join('\n')}`)
+      zip.file('03_미제출점검/unsubmitted.json', JSON.stringify(evidencePackageManifest.files.filter(file => file.submissionStatus !== 'submitted'), null, 2))
+
+      for (const file of evidencePackageManifest.files) {
+        const response = await fetch(file.sourceUrl)
+        if (!response.ok) throw new Error(`${file.sourceUrl} 다운로드 실패`)
+        zip.file(file.targetPath, await response.blob())
+      }
+
+      const blob = await zip.generateAsync({ type: 'blob' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `conception-evidence-package-${todayKey}.zip`
+      link.click()
+      URL.revokeObjectURL(url)
+      setNotice('증빙 제출용 ZIP 파일을 생성했습니다.')
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '증빙 ZIP 파일을 생성하지 못했습니다.')
+    }
   }
 
   const renderTaskAttachments = (taskAttachments?: Attachment[], compact = false, task?: Task) => {
@@ -2408,10 +2452,11 @@ export default function GovProjectDashboard() {
                 <div>
                   <p className="text-xs font-semibold text-slate-700">ZIP PACKAGE BLUEPRINT</p>
                   <h3 className="text-xl font-bold text-slate-900 mt-1">증빙 제출용 ZIP 구조</h3>
-                  <p className="text-sm text-slate-500 mt-2">실제 ZIP 다운로드 구현 전, 제출 패키지의 폴더 구조와 파일 매니페스트를 먼저 생성합니다.</p>
+                  <p className="text-sm text-slate-500 mt-2">제출 표지, 증빙 목록, 업무별 증빙 파일, 미제출 점검 목록을 하나의 ZIP으로 생성합니다.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <button type="button" onClick={() => downloadJson(`conception-evidence-package-manifest-${todayKey}.json`, evidencePackageManifest)} className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white shadow-sm">매니페스트 JSON</button>
+                  <button type="button" onClick={() => void downloadEvidenceZip()} className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white shadow-sm">ZIP 다운로드</button>
+                  <button type="button" onClick={() => downloadJson(`conception-evidence-package-manifest-${todayKey}.json`, evidencePackageManifest)} className="rounded-xl bg-indigo-50 px-4 py-3 text-sm font-bold text-indigo-700 border border-indigo-100">매니페스트 JSON</button>
                   <button type="button" onClick={() => downloadCsv(`conception-evidence-package-files-${todayKey}.csv`, evidencePackageManifest.files.map(file => ({ 순번: file.order, 업무명: file.taskName, 담당자: file.assignee, 태그: file.tag, 제출상태: file.submissionStatus, 저장경로: file.targetPath, 원본URL: file.sourceUrl })))} className="rounded-xl bg-white px-4 py-3 text-sm font-bold text-slate-700 border border-slate-200">파일목록 CSV</button>
                 </div>
               </div>
@@ -2441,7 +2486,7 @@ export default function GovProjectDashboard() {
                     ))}
                     {evidencePackageManifest.files.length === 0 && <div className="rounded-lg bg-white p-6 text-center text-sm text-slate-500">패키지에 포함할 증빙 파일이 없습니다.</div>}
                   </div>
-                  <p className="mt-3 text-xs text-slate-500">다음 단계에서 ZIP 라이브러리를 추가하면 위 매니페스트 기준으로 실제 압축 파일을 생성할 수 있습니다.</p>
+                  <p className="mt-3 text-xs text-slate-500">ZIP에는 제출표지 README, manifest.json, files.csv, 미제출 점검 목록, 원본 증빙 파일이 포함됩니다.</p>
                 </div>
               </div>
             </section>
