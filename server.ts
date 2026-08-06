@@ -37,7 +37,11 @@ interface Task {
   estimatedDays?: number
   amount?: number
   assignee?: string
+  collaborators?: string[]
   project?: string
+  categoryGroup?: 'nationalProject' | 'budgetApproval' | 'evidenceAudit' | 'peoplePerformance' | 'businessSupport'
+  categoryDetail?: string
+  workType?: 'planning' | 'execution' | 'settlement' | 'review' | 'report' | 'submission'
   budgetCategory?: 'labor' | 'materials' | 'activity' | 'international' | 'outsourcing' | 'incentive' | 'indirect'
   cashAmount?: number
   inKindAmount?: number
@@ -236,7 +240,7 @@ app.get('/tasks', (req, res) => {
 
 // POST /tasks
 app.post('/tasks', (req, res) => {
-  const { name, description, deadline, difficulty, estimatedDays, amount, assignee, project, budgetCategory, cashAmount, inKindAmount, approvalStage, status, attachments } = req.body
+  const { name, description, deadline, difficulty, estimatedDays, amount, assignee, collaborators, project, categoryGroup, categoryDetail, workType, budgetCategory, cashAmount, inKindAmount, approvalStage, status, attachments } = req.body
 
   const newTask: Task = {
     id: uuidv4(),
@@ -247,7 +251,11 @@ app.post('/tasks', (req, res) => {
     estimatedDays: estimatedDays || 3,
     amount: amount || 0,
     assignee,
+    collaborators: Array.isArray(collaborators) ? collaborators : [],
     project,
+    categoryGroup: categoryGroup || 'nationalProject',
+    categoryDetail: categoryDetail || '사업계획',
+    workType: workType || 'execution',
     budgetCategory,
     cashAmount: Number(cashAmount || 0),
     inKindAmount: Number(inKindAmount || 0),

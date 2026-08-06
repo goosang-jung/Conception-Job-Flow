@@ -10,7 +10,11 @@ interface Task {
   estimatedDays?: number
   amount?: number
   assignee?: string
+  collaborators?: string[]
   project?: 'government' | 'internal' | 'operations'
+  categoryGroup?: WorkCategoryGroup
+  categoryDetail?: string
+  workType?: WorkType
   budgetCategory?: BudgetCategory
   cashAmount?: number
   inKindAmount?: number
@@ -26,6 +30,8 @@ interface Task {
 }
 
 type BudgetCategory = 'labor' | 'materials' | 'activity' | 'international' | 'outsourcing' | 'incentive' | 'indirect'
+type WorkCategoryGroup = 'nationalProject' | 'budgetApproval' | 'evidenceAudit' | 'peoplePerformance' | 'businessSupport'
+type WorkType = 'planning' | 'execution' | 'settlement' | 'review' | 'report' | 'submission'
 
 interface ApprovalHistory {
   id: string
@@ -92,6 +98,23 @@ const PROJECT_TYPES = [
   { id: 'operations', label: '운영/지속' },
 ] as const
 
+const WORK_CATEGORY_GROUPS: Array<{ id: WorkCategoryGroup; label: string; details: string[] }> = [
+  { id: 'nationalProject', label: '국가과제 관리', details: ['사업계획', '협약', '예산 편성', '집행 관리', '정산', '성과 보고'] },
+  { id: 'budgetApproval', label: '예산·결재 관리', details: ['예산 신청', '예산 변경', '결재 요청', '승인', '집행 완료', '반려/재요청'] },
+  { id: 'evidenceAudit', label: '증빙·감사 관리', details: ['견적서', '영수증', '검수사진', '회의사진', '현장영상', '결과물', '제출 자료'] },
+  { id: 'peoplePerformance', label: '인사·성과 관리', details: ['연차', '일정', '출장', '교육', '개인 실적', '고과 평가'] },
+  { id: 'businessSupport', label: '경영지원 관리', details: ['지원사업', '외부 협력', '구매/계약', '특허/논문', '회의/보고'] },
+]
+
+const WORK_TYPES: Array<{ id: WorkType; label: string }> = [
+  { id: 'planning', label: '기획' },
+  { id: 'execution', label: '실행' },
+  { id: 'settlement', label: '정산' },
+  { id: 'review', label: '검토' },
+  { id: 'report', label: '보고' },
+  { id: 'submission', label: '제출' },
+]
+
 const PERSONAL_TYPES = {
   leave: { label: '연차/휴가', subtypes: [['annual','연차'],['half-am','오전 반차'],['half-pm','오후 반차'],['sick','병가'],['special','특별휴가']] },
   schedule: { label: '개인 일정', subtypes: [['meeting','회의'],['training','교육'],['focus','집중업무'],['external','외부 일정'],['other','기타']] },
@@ -140,6 +163,8 @@ export default function GovProjectDashboard() {
   const [view, setView] = useState<'priority' | 'table' | 'calendar' | 'timeline' | 'people' | 'management'>('priority')
   const [selectedAssignee, setSelectedAssignee] = useState<string>('전체')
   const [selectedProject, setSelectedProject] = useState<string>('전체')
+  const [selectedCategoryGroup, setSelectedCategoryGroup] = useState<string>('전체')
+  const [selectedCategoryDetail, setSelectedCategoryDetail] = useState<string>('전체')
   const [currentMonth, setCurrentMonth] = useState(new Date())
   const [newTeamMember, setNewTeamMember] = useState('')
   const [showTeamModal, setShowTeamModal] = useState(false)
@@ -150,7 +175,11 @@ export default function GovProjectDashboard() {
   const [estimatedDays, setEstimatedDays] = useState<number>(3)
   const [amount, setAmount] = useState<number>(0)
   const [assignee, setAssignee] = useState<string>('정구상')
+  const [collaborators, setCollaborators] = useState<string[]>([])
   const [project, setProject] = useState<'government' | 'internal' | 'operations'>('government')
+  const [categoryGroup, setCategoryGroup] = useState<WorkCategoryGroup>('nationalProject')
+  const [categoryDetail, setCategoryDetail] = useState('사업계획')
+  const [workType, setWorkType] = useState<WorkType>('execution')
   const [budgetCategory, setBudgetCategory] = useState<BudgetCategory>('labor')
   const [cashAmount, setCashAmount] = useState<number>(0)
   const [inKindAmount, setInKindAmount] = useState<number>(0)
@@ -554,7 +583,11 @@ export default function GovProjectDashboard() {
       estimatedDays,
       amount,
       assignee,
+      collaborators,
       project,
+      categoryGroup,
+      categoryDetail,
+      workType,
       budgetCategory,
       cashAmount,
       inKindAmount,
@@ -579,7 +612,11 @@ export default function GovProjectDashboard() {
       setEstimatedDays(3)
       setAmount(0)
       setAssignee('정구상')
+      setCollaborators([])
       setProject('government')
+      setCategoryGroup('nationalProject')
+      setCategoryDetail('사업계획')
+      setWorkType('execution')
       setBudgetCategory('labor')
       setCashAmount(0)
       setInKindAmount(0)
@@ -759,11 +796,17 @@ export default function GovProjectDashboard() {
   const priorities = calculatePriorities()
   const visibleTasks = tasks.filter(task => {
     const query = search.trim().toLowerCase()
-    const matchesSearch = !query || `${task.name} ${task.description} ${task.assignee || ''}`.toLowerCase().includes(query)
+    const matchesSearch = !query || `${task.name} ${task.description} ${task.assignee || ''} ${(task.collaborators || []).join(' ')} ${task.categoryDetail || ''}`.toLowerCase().includes(query)
     const matchesAssignee = selectedAssignee === '전체' || task.assignee === selectedAssignee
     const matchesProject = selectedProject === '전체' || task.project === selectedProject
-    return matchesSearch && matchesAssignee && matchesProject
+    const matchesCategoryGroup = selectedCategoryGroup === '전체' || (task.categoryGroup || 'nationalProject') === selectedCategoryGroup
+    const matchesCategoryDetail = selectedCategoryDetail === '전체' || (task.categoryDetail || '사업계획') === selectedCategoryDetail
+    return matchesSearch && matchesAssignee && matchesProject && matchesCategoryGroup && matchesCategoryDetail
   })
+  const selectedCategoryDetails = selectedCategoryGroup === '전체'
+    ? Array.from(new Set(WORK_CATEGORY_GROUPS.flatMap(group => group.details)))
+    : WORK_CATEGORY_GROUPS.find(group => group.id === selectedCategoryGroup)?.details || []
+  const formCategoryDetails = WORK_CATEGORY_GROUPS.find(group => group.id === categoryGroup)?.details || []
   const completedCount = tasks.filter(task => task.status === 'completed').length
   const urgentCount = tasks.filter(task => new Date(task.deadline).getTime() <= Date.now() + 7 * 86400000 && task.status !== 'completed').length
   const completionRate = tasks.length ? Math.round((completedCount / tasks.length) * 100) : 0
@@ -1099,6 +1142,20 @@ export default function GovProjectDashboard() {
         {/* 프로젝트 필터 */}
         {view === 'table' && <div className="executive-card mb-6 flex gap-5 flex-wrap rounded-xl p-4">
           <div className="flex gap-2 flex-wrap">
+            <span className="text-[11px] uppercase font-bold text-slate-400 my-auto mr-1">대목록</span>
+            <button onClick={() => { setSelectedCategoryGroup('전체'); setSelectedCategoryDetail('전체') }} className={`px-3 py-1 rounded-full text-sm ${selectedCategoryGroup === '전체' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>전체</button>
+            {WORK_CATEGORY_GROUPS.map(group => (
+              <button key={group.id} onClick={() => { setSelectedCategoryGroup(group.id); setSelectedCategoryDetail('전체') }} className={`px-3 py-1 rounded-full text-sm ${selectedCategoryGroup === group.id ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>{group.label}</button>
+            ))}
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <span className="text-[11px] uppercase font-bold text-slate-400 my-auto mr-1">세부목록</span>
+            <button onClick={() => setSelectedCategoryDetail('전체')} className={`px-3 py-1 rounded-full text-sm ${selectedCategoryDetail === '전체' ? 'bg-teal-700 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>전체</button>
+            {selectedCategoryDetails.map(detail => (
+              <button key={detail} onClick={() => setSelectedCategoryDetail(detail)} className={`px-3 py-1 rounded-full text-sm ${selectedCategoryDetail === detail ? 'bg-teal-700 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>{detail}</button>
+            ))}
+          </div>
+          <div className="flex gap-2 flex-wrap">
             <span className="text-[11px] uppercase font-bold text-slate-400 my-auto mr-1">프로젝트</span>
             <button
               onClick={() => setSelectedProject('전체')}
@@ -1422,6 +1479,29 @@ export default function GovProjectDashboard() {
                     ))}
                   </select>
                 </div>
+                <div className="mb-4 rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+                  <label className="block text-sm font-bold text-slate-800 mb-2">업무 체계 분류</label>
+                  <div className="grid grid-cols-1 gap-3">
+                    <select
+                      aria-label="업무 대목록"
+                      value={categoryGroup}
+                      onChange={e => {
+                        const next = e.target.value as WorkCategoryGroup
+                        setCategoryGroup(next)
+                        setCategoryDetail(WORK_CATEGORY_GROUPS.find(group => group.id === next)?.details[0] || '')
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    >
+                      {WORK_CATEGORY_GROUPS.map(group => <option key={group.id} value={group.id}>{group.label}</option>)}
+                    </select>
+                    <select aria-label="업무 세부목록" value={categoryDetail} onChange={e => setCategoryDetail(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                      {formCategoryDetails.map(detail => <option key={detail} value={detail}>{detail}</option>)}
+                    </select>
+                    <select aria-label="업무 유형" value={workType} onChange={e => setWorkType(e.target.value as WorkType)} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                      {WORK_TYPES.map(type => <option key={type.id} value={type.id}>{type.label}</option>)}
+                    </select>
+                  </div>
+                </div>
                 <div className="mb-4">
                   <label className="block text-sm font-medium mb-2">담당자</label>
                   <select
@@ -1435,6 +1515,21 @@ export default function GovProjectDashboard() {
                       </option>
                     ))}
                   </select>
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium mb-2">협업자</label>
+                  <div className="flex flex-wrap gap-2 rounded-lg border border-gray-300 bg-white p-2">
+                    {team.filter(person => person !== assignee).map(person => (
+                      <button
+                        key={person}
+                        type="button"
+                        onClick={() => setCollaborators(prev => prev.includes(person) ? prev.filter(item => item !== person) : [...prev, person])}
+                        className={`rounded-full px-3 py-1 text-xs font-semibold ${collaborators.includes(person) ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}
+                      >
+                        {person}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                   <div>
@@ -1516,7 +1611,12 @@ export default function GovProjectDashboard() {
               <div className="md:hidden space-y-3">
                 {visibleTasks.map(task => <article key={task.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
                   <div className="flex items-start justify-between gap-3"><div className="min-w-0"><h3 className="font-bold text-gray-900 break-words">{task.name}</h3><p className="text-sm text-gray-500 mt-1 line-clamp-2 break-words">{task.description}</p></div><span className="shrink-0 text-xs px-2 py-1 rounded-full bg-violet-100 text-violet-700">{{pending:'대기','in-progress':'진행',review:'검토',blocked:'보류',completed:'완료'}[task.status]}</span></div>
-                  <div className="grid grid-cols-2 gap-2 mt-4 text-xs"><div className="bg-gray-50 rounded-lg p-2"><span className="text-gray-400 block">마감</span>{new Date(task.deadline).toLocaleDateString('ko-KR')}</div><div className="bg-gray-50 rounded-lg p-2"><span className="text-gray-400 block">담당자</span>{task.assignee || '미배정'}</div><div className="bg-gray-50 rounded-lg p-2"><span className="text-gray-400 block">프로젝트</span>{PROJECT_TYPES.find(p => p.id === task.project)?.label || '미분류'}</div><div className="bg-gray-50 rounded-lg p-2"><span className="text-gray-400 block">예상 기간</span>{task.estimatedDays || 0}일</div></div>
+                  <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-semibold">
+                    <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{WORK_CATEGORY_GROUPS.find(group => group.id === (task.categoryGroup || 'nationalProject'))?.label}</span>
+                    <span className="rounded-full bg-teal-50 px-2 py-1 text-teal-700">{task.categoryDetail || '사업계획'}</span>
+                    <span className="rounded-full bg-amber-50 px-2 py-1 text-amber-700">{WORK_TYPES.find(type => type.id === (task.workType || 'execution'))?.label}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mt-4 text-xs"><div className="bg-gray-50 rounded-lg p-2"><span className="text-gray-400 block">마감</span>{new Date(task.deadline).toLocaleDateString('ko-KR')}</div><div className="bg-gray-50 rounded-lg p-2"><span className="text-gray-400 block">담당자</span>{task.assignee || '미배정'}</div><div className="bg-gray-50 rounded-lg p-2"><span className="text-gray-400 block">협업자</span>{task.collaborators?.length ? task.collaborators.join(', ') : '없음'}</div><div className="bg-gray-50 rounded-lg p-2"><span className="text-gray-400 block">예산/결재</span>{BUDGET_CATEGORIES.find(category => category.id === (task.budgetCategory || 'activity'))?.label} · {BUDGET_APPROVAL_LABELS[task.approvalStage || 'requested']}</div></div>
                   {task.attachments?.length
                     ? renderTaskAttachments(task.attachments, !isAdmin, task)
                     : <div className="mt-3 rounded-xl border border-dashed border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">증빙 누락 · 사진/동영상 자료를 연결해야 합니다.</div>}
@@ -1543,6 +1643,11 @@ export default function GovProjectDashboard() {
                         <td className="px-4 py-3">
                           <div className="font-medium">{task.name}</div>
                           <div className="text-xs text-gray-500 truncate">{task.description}</div>
+                          <div className="mt-2 flex flex-wrap gap-1 text-[11px] font-semibold">
+                            <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{WORK_CATEGORY_GROUPS.find(group => group.id === (task.categoryGroup || 'nationalProject'))?.label}</span>
+                            <span className="rounded-full bg-teal-50 px-2 py-1 text-teal-700">{task.categoryDetail || '사업계획'}</span>
+                            <span className="rounded-full bg-amber-50 px-2 py-1 text-amber-700">{WORK_TYPES.find(type => type.id === (task.workType || 'execution'))?.label}</span>
+                          </div>
                           {task.attachments?.length
                             ? <div className="mt-2"><span className="inline-flex rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600">첨부 {task.attachments.length}개</span>{renderTaskAttachments(task.attachments, !isAdmin, task)}</div>
                             : <div className="mt-2 inline-flex rounded-full bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-700">증빙 누락</div>}
@@ -1556,6 +1661,7 @@ export default function GovProjectDashboard() {
                           <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-medium">
                             {task.assignee || '미배정'}
                           </span>
+                          {task.collaborators?.length ? <div className="mt-2 text-xs text-slate-500">협업: {task.collaborators.join(', ')}</div> : null}
                         </td>
                         <td className="px-4 py-3 text-sm">
                           {new Date(task.deadline).toLocaleDateString('ko-KR')}
