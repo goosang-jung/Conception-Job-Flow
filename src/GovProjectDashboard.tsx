@@ -124,6 +124,15 @@ const ATTACHMENT_TAGS: Array<{ id: AttachmentTag; label: string }> = [
   { id: 'other', label: '기타' },
 ]
 
+const VIEW_LABELS = {
+  priority: { eyebrow: 'DECISION BOARD', title: '우선순위 분석', description: '마감, 금액, 난이도 기준으로 오늘 먼저 판단할 업무를 보여줍니다.' },
+  table: { eyebrow: 'EXECUTION BOARD', title: '업무 목록', description: '담당자, 상태, 마감일, 예산, 증빙을 실제 실행 관리 기준으로 관리합니다.' },
+  calendar: { eyebrow: 'MONTHLY DEADLINE', title: '월간 마감 달력', description: '날짜별 마감 업무와 월간 임박·지연·완료 흐름을 확인합니다.' },
+  timeline: { eyebrow: 'YEARLY OPERATIONS', title: '연간 운영 흐름', description: '월별 업무 밀도, 완료율, 금액 규모를 비교합니다.' },
+  people: { eyebrow: 'PEOPLE OPERATIONS', title: '팀 개인 현황', description: '연차, 일정, 출장, 실적과 업무 영향을 함께 봅니다.' },
+  management: { eyebrow: 'MANAGEMENT CONTROL', title: '운영 관리', description: '예산, 결재, 증빙, 감사, 평가를 하나의 운영 관리 체계로 묶습니다.' },
+} as const
+
 export default function GovProjectDashboard() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [team, setTeam] = useState<string[]>([])
@@ -1059,11 +1068,11 @@ export default function GovProjectDashboard() {
       )}
 
       <div className="app-shell min-h-screen pb-24 md:pb-0">
-      <header className="glass-header text-white sticky top-0 z-30 border-b border-white/10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex flex-wrap items-center justify-between gap-4">
+      <header className="glass-header text-white border-b border-white/10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-white/8 border border-white/15 flex items-center justify-center shadow-inner"><LayoutDashboard size={22} className="text-teal-300" /></div>
-            <div><h1 className="text-xl md:text-2xl font-bold tracking-tight">Conception <span className="text-teal-300">Job Flow</span></h1><p className="text-xs md:text-sm text-slate-400 mt-0.5">Executive Operations Console</p></div>
+            <div className="w-9 h-9 rounded-xl bg-white/8 border border-white/15 flex items-center justify-center shadow-inner"><LayoutDashboard size={19} className="text-teal-300" /></div>
+            <div><h1 className="text-lg md:text-xl font-bold tracking-tight">Conception <span className="text-teal-300">Job Flow</span></h1><p className="text-[11px] md:text-xs text-slate-400 mt-0.5">Executive Operations Console</p></div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
           <span className={`text-xs px-2 py-1 rounded-full ${isOnline ? 'bg-emerald-500/20 text-emerald-200' : 'bg-amber-500/20 text-amber-200'}`}>{isOnline ? '● 온라인' : '● 오프라인'}</span>
@@ -1083,12 +1092,12 @@ export default function GovProjectDashboard() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {error && <div role="alert" className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-red-800">{error}</div>}
         {notice && <div role="status" className="mb-4 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-emerald-800 flex justify-between"><span>{notice}</span><button onClick={() => setNotice('')} aria-label="알림 닫기">×</button></div>}
-        {(view === 'priority' || view === 'table') && <div className="mb-5 relative">
+        {view === 'table' && <div className="mb-5 relative">
           <label htmlFor="task-search" className="sr-only">업무 검색</label>
           <Search size={19} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"/><input id="task-search" value={search} onChange={e => setSearch(e.target.value)} placeholder="업무명, 설명, 담당자 검색" className="surface-input w-full pl-12 pr-4 py-4 rounded-xl" />
         </div>}
         {/* 프로젝트 필터 */}
-        {(view === 'priority' || view === 'table') && <div className="executive-card mb-6 flex gap-5 flex-wrap rounded-xl p-4">
+        {view === 'table' && <div className="executive-card mb-6 flex gap-5 flex-wrap rounded-xl p-4">
           <div className="flex gap-2 flex-wrap">
             <span className="text-[11px] uppercase font-bold text-slate-400 my-auto mr-1">프로젝트</span>
             <button
@@ -1151,7 +1160,7 @@ export default function GovProjectDashboard() {
         </div>}
 
         {/* 뷰 탭 */}
-        <div className="hidden md:flex gap-1 mb-6 rounded-xl bg-slate-900/95 p-1 overflow-x-auto shadow-[0_14px_34px_rgba(15,23,42,0.14)]">
+        <div className="hidden md:flex gap-1 mb-4 rounded-xl bg-slate-900/95 p-1 overflow-x-auto shadow-[0_14px_34px_rgba(15,23,42,0.14)]">
             <button
             onClick={() => navigateToView('priority')}
             className={`px-4 py-2 font-medium whitespace-nowrap rounded-lg ${
@@ -1205,6 +1214,21 @@ export default function GovProjectDashboard() {
             <span className="flex items-center gap-2"><Landmark size={17}/>운영 관리</span>
           </button>
         </div>
+
+        <section className="executive-card mb-5 rounded-xl p-4">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold text-teal-700">{VIEW_LABELS[view].eyebrow}</p>
+              <h2 className="text-xl md:text-2xl font-bold text-slate-900 mt-1">{VIEW_LABELS[view].title}</h2>
+              <p className="text-sm text-slate-500 mt-1">{VIEW_LABELS[view].description}</p>
+            </div>
+            {view !== 'priority' && (
+              <button type="button" onClick={() => navigateToView('priority')} className="self-start md:self-center rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200">
+                초기 대시보드로
+              </button>
+            )}
+          </div>
+        </section>
 
         {/* 콘텐츠 */}
         <div key={view} className="view-panel" aria-live="polite">
