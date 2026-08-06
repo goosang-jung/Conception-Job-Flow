@@ -32,6 +32,7 @@ interface Task {
 type BudgetCategory = 'labor' | 'materials' | 'activity' | 'international' | 'outsourcing' | 'incentive' | 'indirect'
 type WorkCategoryGroup = 'nationalProject' | 'budgetApproval' | 'evidenceAudit' | 'peoplePerformance' | 'businessSupport'
 type WorkType = 'planning' | 'execution' | 'settlement' | 'review' | 'report' | 'submission'
+type CalendarMode = 'integrated' | 'tasks' | 'people' | 'budgetEvidence'
 
 interface ApprovalHistory {
   id: string
@@ -136,6 +137,13 @@ const BUDGET_CATEGORIES: Array<{ id: BudgetCategory; label: string; description:
 
 const BUDGET_APPROVAL_LABELS = { draft: '작성', requested: '결재요청', approved: '승인', paid: '집행완료', rejected: '반려' } as const
 const APPROVAL_STAGE_ORDER: Array<NonNullable<Task['approvalStage']>> = ['draft', 'requested', 'approved', 'paid', 'rejected']
+const TASK_STATUS_LABELS: Record<Task['status'], string> = {
+  pending: '대기',
+  'in-progress': '진행 중',
+  review: '검토/승인',
+  blocked: '보류/차단',
+  completed: '완료',
+}
 
 const ATTACHMENT_TAGS: Array<{ id: AttachmentTag; label: string }> = [
   { id: 'quote', label: '견적서' },
@@ -156,6 +164,13 @@ const VIEW_LABELS = {
   management: { eyebrow: 'MANAGEMENT CONTROL', title: '운영 관리', description: '예산, 결재, 증빙, 감사, 평가를 하나의 운영 관리 체계로 묶습니다.' },
 } as const
 
+const CALENDAR_MODES: Array<{ id: CalendarMode; label: string; description: string }> = [
+  { id: 'integrated', label: '통합 운영', description: '업무, 인력, 예산·증빙 일정을 함께 봅니다.' },
+  { id: 'tasks', label: '업무 마감', description: '업무 마감일과 결재 상태를 봅니다.' },
+  { id: 'people', label: '인력 일정', description: '연차, 출장, 교육, 외부 일정을 봅니다.' },
+  { id: 'budgetEvidence', label: '예산·증빙', description: '예산 집행, 정산, 증빙, 감사 대응 일정을 봅니다.' },
+]
+
 export default function GovProjectDashboard() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [team, setTeam] = useState<string[]>([])
@@ -166,6 +181,8 @@ export default function GovProjectDashboard() {
   const [selectedCategoryGroup, setSelectedCategoryGroup] = useState<string>('전체')
   const [selectedCategoryDetail, setSelectedCategoryDetail] = useState<string>('전체')
   const [currentMonth, setCurrentMonth] = useState(new Date())
+  const [calendarMode, setCalendarMode] = useState<CalendarMode>('integrated')
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [newTeamMember, setNewTeamMember] = useState('')
   const [showTeamModal, setShowTeamModal] = useState(false)
   const [name, setName] = useState('')
@@ -845,6 +862,35 @@ export default function GovProjectDashboard() {
     .sort((a, b) => a.deadline.localeCompare(b.deadline))
   const monthlyUrgentCount = currentMonthTasks.filter(task => new Date(task.deadline).getTime() <= Date.now() + 7 * 86400000 && task.status !== 'completed').length
   const monthlyCompletedCount = currentMonthTasks.filter(task => task.status === 'completed').length
+  const calendarEvents = [
+    ...tasks.map(task => ({
+      id: `task-${task.id}`,
+      date: task.deadline,
+      mode: 'tasks' as CalendarMode,
+      tone: new Date(task.deadline).getTime() < Date.now() && task.status !== 'completed' ? 'risk' : task.status === 'completed' ? 'done' : 'task',
+      title: task.name,
+      subtitle: `${task.assignee || '미배정'} · ${BUDGET_APPROVAL_LABELS[task.approvalStage || 'requested']}`,
+      detail: `업무 마감 · ${TASK_STATUS_LABELS[task.status]} · 증빙 ${task.attachments?.length || 0}개`,
+    })),
+    ...personalEntries.flatMap(entry => {
+      const label = PERSONAL_TYPES[entry.type].label
+      return [{ id: `people-${entry.id}`, date: entry.startDate, mode: 'people' as CalendarMode, tone: entry.type === 'leave' ? 'people' : entry.type === 'trip' ? 'travel' : 'people', title: entry.title || label, subtitle: `${entry.person} · ${label}`, detail: `${entry.startDate}${entry.endDate !== entry.startDate ? ` ~ ${entry.endDate}` : ''} · ${APPROVAL_LABELS[entry.approvalStatus || 'requested']}` }]
+    }),
+    ...tasks.filter(task => (task.amount || 0) > 0 || (task.cashAmount || 0) > 0 || (task.inKindAmount || 0) > 0).flatMap(task => {
+      const amountTotal = (task.cashAmount ?? task.amount ?? 0) + (task.inKindAmount || 0)
+      return [
+        { id: `budget-${task.id}`, date: task.deadline, mode: 'budgetEvidence' as CalendarMode, tone: task.approvalStage === 'paid' ? 'done' : task.approvalStage === 'rejected' ? 'risk' : 'budget', title: `${BUDGET_CATEGORIES.find(category => category.id === (task.budgetCategory || 'activity'))?.label} ${amountTotal}만원`, subtitle: task.name, detail: `예산/결재 · ${BUDGET_APPROVAL_LABELS[task.approvalStage || 'requested']} · 현금 ${task.cashAmount ?? task.amount ?? 0} / 현물 ${task.inKindAmount || 0}` },
+        ...(task.attachments?.length ? [{ id: `evidence-${task.id}`, date: task.deadline, mode: 'budgetEvidence' as CalendarMode, tone: 'evidence', title: `증빙 ${task.attachments.length}개`, subtitle: task.name, detail: `증빙 제출/감사 대응 · ${task.attachments.map(item => ATTACHMENT_TAGS.find(tag => tag.id === (item.tag || 'other'))?.label).join(', ')}` }] : [{ id: `evidence-missing-${task.id}`, date: task.deadline, mode: 'budgetEvidence' as CalendarMode, tone: 'risk', title: '증빙 누락', subtitle: task.name, detail: '예산 업무인데 연결된 증빙이 없습니다.' }]),
+      ]
+    }),
+  ]
+  const visibleCalendarEvents = calendarEvents.filter(event => calendarMode === 'integrated' || event.mode === calendarMode)
+  const selectedDateEvents = visibleCalendarEvents.filter(event => event.date === selectedCalendarDate)
+  const monthCalendarEvents = visibleCalendarEvents.filter(event => {
+    const date = new Date(event.date)
+    return date.getFullYear() === currentMonth.getFullYear() && date.getMonth() === currentMonth.getMonth()
+  })
+  const monthRiskCalendarEvents = monthCalendarEvents.filter(event => event.tone === 'risk')
   const yearlyMonths = Array.from({ length: 12 }, (_, i) => {
     const monthTasks = tasks.filter(task => {
       const date = new Date(task.deadline)
@@ -2446,7 +2492,7 @@ export default function GovProjectDashboard() {
                 <h2 className="text-2xl font-bold text-slate-900 mt-1">
                   {currentMonth.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long' })}
                 </h2>
-                <p className="text-sm text-slate-500 mt-2">마감일 기준의 월간 운영 달력입니다.</p>
+                <p className="text-sm text-slate-500 mt-2">{CALENDAR_MODES.find(mode => mode.id === calendarMode)?.description}</p>
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1))} className="px-3 py-2 bg-slate-100 rounded-lg hover:bg-slate-200" aria-label="이전 달">←</button>
@@ -2454,10 +2500,17 @@ export default function GovProjectDashboard() {
                 <button onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1))} className="px-3 py-2 bg-slate-100 rounded-lg hover:bg-slate-200" aria-label="다음 달">→</button>
               </div>
             </div>
+            <div className="mb-5 flex flex-wrap gap-2">
+              {CALENDAR_MODES.map(mode => (
+                <button key={mode.id} type="button" onClick={() => setCalendarMode(mode.id)} className={`rounded-full px-3 py-2 text-xs font-bold transition ${calendarMode === mode.id ? 'bg-slate-900 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                  {mode.label}
+                </button>
+              ))}
+            </div>
             <div className="grid grid-cols-3 gap-2 mb-5 text-center">
-              <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">월간 업무</div><div className="text-xl font-bold">{currentMonthTasks.length}</div></div>
-              <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">임박/지연</div><div className="text-xl font-bold text-amber-700">{monthlyUrgentCount}</div></div>
-              <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">완료</div><div className="text-xl font-bold text-teal-700">{monthlyCompletedCount}</div></div>
+              <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">월간 일정</div><div className="text-xl font-bold">{monthCalendarEvents.length}</div></div>
+              <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">지연/위험</div><div className="text-xl font-bold text-red-700">{monthRiskCalendarEvents.length}</div></div>
+              <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">선택 날짜</div><div className="text-xl font-bold text-teal-700">{selectedDateEvents.length}</div></div>
             </div>
 
             <div className="grid grid-cols-7 gap-px bg-slate-200 border border-slate-200 rounded-lg overflow-hidden">
@@ -2482,40 +2535,74 @@ export default function GovProjectDashboard() {
 
                   const date = new Date(year, month, day)
                   const dateStr = date.toISOString().split('T')[0]
-                  const dayTasks = tasks.filter(t => t.deadline === dateStr)
+                  const dayEvents = visibleCalendarEvents.filter(event => event.date === dateStr)
 
                   return (
-                    <div
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCalendarDate(dateStr)}
                       key={day}
                       className={`p-1.5 md:p-3 min-h-20 md:min-h-32 overflow-hidden ${
-                        dayTasks.length > 0
-                          ? 'bg-sky-50'
+                        selectedCalendarDate === dateStr ? 'bg-teal-50 ring-2 ring-teal-500 ring-inset' :
+                        dayEvents.some(event => event.tone === 'risk') ? 'bg-red-50' :
+                        dayEvents.length > 0
+                          ? 'bg-sky-50 text-left'
                           : 'bg-white'
                       }`}
                     >
                       <div className="font-bold text-gray-900 mb-1 md:mb-2 text-sm md:text-base">{day}</div>
                       <div className="space-y-1 md:space-y-1.5">
-                        {dayTasks.slice(0, 2).map(task => (
+                        {dayEvents.slice(0, 3).map(event => (
                           <div
-                            key={task.id}
+                            key={event.id}
                             className={`text-[10px] md:text-xs px-1 md:px-2 py-0.5 md:py-1 rounded truncate border ${
-                              task.status === 'completed' ? 'bg-emerald-100 text-emerald-800 border-emerald-200' :
-                              task.status === 'blocked' ? 'bg-red-100 text-red-800 border-red-200' :
-                              task.status === 'review' ? 'bg-violet-100 text-violet-800 border-violet-200' :
+                              event.tone === 'done' ? 'bg-emerald-100 text-emerald-800 border-emerald-200' :
+                              event.tone === 'risk' ? 'bg-red-100 text-red-800 border-red-200' :
+                              event.tone === 'people' ? 'bg-violet-100 text-violet-800 border-violet-200' :
+                              event.tone === 'travel' ? 'bg-indigo-100 text-indigo-800 border-indigo-200' :
+                              event.tone === 'budget' ? 'bg-amber-100 text-amber-800 border-amber-200' :
+                              event.tone === 'evidence' ? 'bg-purple-100 text-purple-800 border-purple-200' :
                               'bg-white text-slate-700 border-slate-200'
                             }`}
                           >
-                            {task.assignee || '미배정'} · {task.name}
+                            {event.title}
                           </div>
                         ))}
-                        {dayTasks.length > 2 && (
-                          <div className="text-[10px] md:text-xs text-gray-600">+{dayTasks.length - 2}개</div>
+                        {dayEvents.length > 3 && (
+                          <div className="text-[10px] md:text-xs text-gray-600">+{dayEvents.length - 3}개</div>
                         )}
                       </div>
-                    </div>
+                    </button>
                   )
                 })
               })()}
+            </div>
+            <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">선택 날짜 상세</h3>
+                  <p className="mt-1 text-xs text-slate-500">{new Date(selectedCalendarDate).toLocaleDateString('ko-KR')} · {CALENDAR_MODES.find(mode => mode.id === calendarMode)?.label}</p>
+                </div>
+                <div className="flex flex-wrap gap-2 text-[11px] text-slate-500">
+                  <span className="text-sky-700">● 업무</span><span className="text-violet-700">● 인력</span><span className="text-amber-700">● 예산</span><span className="text-red-700">● 위험</span>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                {selectedDateEvents.map(event => (
+                  <article key={event.id} className={`rounded-lg border px-3 py-3 text-sm ${
+                    event.tone === 'risk' ? 'border-red-200 bg-red-50 text-red-800' :
+                    event.tone === 'done' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' :
+                    event.mode === 'people' ? 'border-violet-200 bg-violet-50 text-violet-800' :
+                    event.mode === 'budgetEvidence' ? 'border-amber-200 bg-amber-50 text-amber-800' :
+                    'border-slate-200 bg-white text-slate-700'
+                  }`}>
+                    <div className="font-bold">{event.title}</div>
+                    <div className="mt-1 text-xs opacity-80">{event.subtitle}</div>
+                    <div className="mt-2 text-xs">{event.detail}</div>
+                  </article>
+                ))}
+                {selectedDateEvents.length === 0 && <div className="md:col-span-2 rounded-lg bg-white p-6 text-center text-sm text-slate-500">선택한 날짜의 일정이 없습니다.</div>}
+              </div>
             </div>
           </div>
           </div>
