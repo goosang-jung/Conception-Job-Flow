@@ -1008,11 +1008,6 @@ export default function GovProjectDashboard() {
     메모: log.history.memo || '',
     반려사유: log.history.stage === 'rejected' ? (log.history.memo || log.task.rejectionReason || '') : '',
   }))
-  const aiBudgetAlerts = [
-    pendingBudgetApprovals.length ? `결재 대기 예산 ${pendingBudgetApprovals.length}건을 먼저 승인해야 합니다.` : '결재 대기 병목은 낮습니다.',
-    evidenceReadyCount < budgetedTasks.length ? `증빙이 없는 예산 항목 ${budgetedTasks.length - evidenceReadyCount}건이 있습니다.` : '모든 예산 항목에 증빙이 연결되어 있습니다.',
-    budgetCategoryRows.some(row => row.total > nationalRndBudgetTotal * 0.45 && nationalRndBudgetTotal > 0) ? '특정 세목 편중이 큽니다. 세목 간 집행 균형을 확인하세요.' : '세목 분산은 안정적입니다.',
-  ]
   const patentEntries = personalEntries.filter(entry => entry.type === 'performance' && entry.subtype === 'patent')
   const educationEntries = personalEntries.filter(entry => entry.type === 'schedule' && entry.subtype === 'training')
   const supportEntries = personalEntries.filter(entry =>
@@ -1036,6 +1031,41 @@ export default function GovProjectDashboard() {
     const annualScore = Math.min(100, executionScore + performanceScore + patentScore + operationScore)
     return { person, personTasks, doneTasks, personPerformances, personPatents, personTrips, personLeave, annualScore }
   })
+  const overdueTasks = tasks.filter(task => new Date(task.deadline).getTime() < Date.now() && task.status !== 'completed')
+  const firstApprovalCandidate = approvalQueueTasks[0]
+  const missingEvidenceCandidate = missingEvidenceTasks.sort((a, b) => ((b.cashAmount ?? b.amount ?? 0) + (b.inKindAmount || 0)) - ((a.cashAmount ?? a.amount ?? 0) + (a.inKindAmount || 0)))[0]
+  const largePendingBudgetTask = approvalQueueTasks.sort((a, b) => ((b.cashAmount ?? b.amount ?? 0) + (b.inKindAmount || 0)) - ((a.cashAmount ?? a.amount ?? 0) + (a.inKindAmount || 0)))[0]
+  const overloadedPeople = managementRows
+    .map(row => ({
+      ...row,
+      activeTasks: row.personTasks.filter(task => task.status !== 'completed'),
+      urgentTasks: row.personTasks.filter(task => new Date(task.deadline).getTime() <= Date.now() + 7 * 86400000 && task.status !== 'completed'),
+    }))
+    .filter(row => row.activeTasks.length >= 3 || row.urgentTasks.length >= 2)
+    .sort((a, b) => b.activeTasks.length - a.activeTasks.length)
+  const budgetConcentrationRisk = budgetCategoryRows
+    .filter(row => nationalRndBudgetTotal > 0 && row.total > nationalRndBudgetTotal * 0.45)
+    .sort((a, b) => b.total - a.total)[0]
+  const aiOperationsAdvice = [
+    firstApprovalCandidate
+      ? { tone: 'amber', title: '가장 먼저 결재할 항목', body: `${firstApprovalCandidate.name} · ${firstApprovalCandidate.assignee || '미배정'} · ${BUDGET_APPROVAL_LABELS[firstApprovalCandidate.approvalStage || 'requested']} 상태입니다. 마감 ${new Date(firstApprovalCandidate.deadline).toLocaleDateString('ko-KR')} 전에 승인 여부를 먼저 판단하세요.` }
+      : { tone: 'teal', title: '결재 병목', body: '현재 결재 요청·반려·작성 상태의 예산 병목은 낮습니다.' },
+    missingEvidenceCandidate
+      ? { tone: 'red', title: '증빙 부족 항목', body: `${missingEvidenceCandidate.name} 항목은 예산이 연결되어 있지만 증빙이 없습니다. 견적서, 영수증, 검수사진 중 최소 1개를 연결하세요.` }
+      : { tone: 'teal', title: '증빙 상태', body: '예산 업무의 증빙 연결 상태가 안정적입니다.' },
+    largePendingBudgetTask
+      ? { tone: 'amber', title: '금액이 큰 결재 병목', body: `${largePendingBudgetTask.name} · 총 ${((largePendingBudgetTask.cashAmount ?? largePendingBudgetTask.amount ?? 0) + (largePendingBudgetTask.inKindAmount || 0))}만원이 ${BUDGET_APPROVAL_LABELS[largePendingBudgetTask.approvalStage || 'requested']} 단계에 있습니다.` }
+      : { tone: 'teal', title: '고액 결재 병목', body: '고액 결재 대기 항목이 뚜렷하지 않습니다.' },
+    overdueTasks.length
+      ? { tone: 'red', title: '마감 초과 업무', body: `${overdueTasks.length}건이 마감을 넘겼습니다. ${overdueTasks[0].name}부터 상태 변경 또는 일정 재조정이 필요합니다.` }
+      : { tone: 'teal', title: '마감 리스크', body: '마감 초과 업무는 없습니다.' },
+    overloadedPeople.length
+      ? { tone: 'red', title: '담당자 과부하 가능성', body: `${overloadedPeople[0].person} 담당자가 활성 업무 ${overloadedPeople[0].activeTasks.length}건, 임박 업무 ${overloadedPeople[0].urgentTasks.length}건을 보유했습니다. 협업자 배정이나 마감 조정이 필요합니다.` }
+      : { tone: 'teal', title: '담당자 부하', body: '담당자별 업무 부하는 관리 가능한 수준입니다.' },
+    budgetConcentrationRisk
+      ? { tone: 'amber', title: '예산 편중 위험', body: `${budgetConcentrationRisk.label} 세목이 전체 예산의 ${Math.round((budgetConcentrationRisk.total / nationalRndBudgetTotal) * 100)}%를 차지합니다. 세목 편중 사유를 남겨두세요.` }
+      : { tone: 'teal', title: '예산 편중', body: '세목별 예산 분산은 안정적입니다.' },
+  ] as Array<{ tone: 'teal' | 'amber' | 'red'; title: string; body: string }>
 
   const getPriorityColor = (rank: number) => {
     if (rank === 1) return 'executive-card before:bg-amber-500'
@@ -2284,9 +2314,24 @@ export default function GovProjectDashboard() {
                   </div>
                   <div className="lg:col-span-3 space-y-3">
                     <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
-                      <div className="text-xs font-semibold text-amber-700">AI 예산 점검</div>
-                      <div className="mt-2 space-y-2">
-                        {aiBudgetAlerts.map(alert => <div key={alert} className="rounded-lg bg-white/80 px-3 py-2 text-xs text-slate-700">{alert}</div>)}
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-xs font-semibold text-amber-700">AI 운영 보조</div>
+                          <h4 className="mt-1 text-sm font-bold text-slate-900">오늘의 운영 조언</h4>
+                        </div>
+                        <span className="rounded-full bg-white px-2 py-1 text-[11px] font-bold text-slate-600">{aiOperationsAdvice.length}개 점검</span>
+                      </div>
+                      <div className="mt-3 space-y-2">
+                        {aiOperationsAdvice.map(advice => (
+                          <div key={advice.title} className={`rounded-lg border px-3 py-2 text-xs ${
+                            advice.tone === 'red' ? 'border-red-200 bg-red-50 text-red-800' :
+                            advice.tone === 'amber' ? 'border-amber-200 bg-white text-slate-700' :
+                            'border-teal-200 bg-teal-50 text-teal-800'
+                          }`}>
+                            <div className="font-bold">{advice.title}</div>
+                            <p className="mt-1 leading-relaxed">{advice.body}</p>
+                          </div>
+                        ))}
                       </div>
                     </div>
                     <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
