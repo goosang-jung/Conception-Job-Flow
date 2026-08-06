@@ -359,6 +359,17 @@ export default function GovProjectDashboard() {
     setNotice(`${fileName} 파일을 생성했습니다.`)
   }
 
+  const downloadJson = (fileName: string, payload: unknown) => {
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    link.click()
+    URL.revokeObjectURL(url)
+    setNotice(`${fileName} 파일을 생성했습니다.`)
+  }
+
   const renderTaskAttachments = (taskAttachments?: Attachment[], compact = false, task?: Task) => {
     if (!taskAttachments?.length) return null
     return (
@@ -1019,6 +1030,42 @@ export default function GovProjectDashboard() {
     메모: attachment.note || '',
     URL: mediaUrl(attachment.url),
   }))
+  const evidencePackageManifest = {
+    packageTitle: submissionPackageTitle,
+    organization: submissionOrganization,
+    projectName: submissionProjectName,
+    owner: submissionOwner,
+    period: { startDate: submissionStartDate, endDate: submissionEndDate },
+    createdAt: new Date().toISOString(),
+    summary: {
+      totalEvidence: evidenceItems.length,
+      submittedEvidence: submittedEvidenceCount,
+      unsubmittedEvidence: unsubmittedEvidenceCount,
+      readyTasks: evidenceReadyForSubmission,
+      totalBudgetTasks: evidenceSubmissionRows.length,
+    },
+    folderStructure: [
+      '00_제출표지/',
+      '01_증빙목록/',
+      '02_업무별증빙/',
+      '03_미제출점검/',
+    ],
+    files: evidenceItems.map(({ task, attachment }, index) => {
+      const tagLabel = ATTACHMENT_TAGS.find(tag => tag.id === (attachment.tag || 'other'))?.label || '기타'
+      const safeTaskName = task.name.replace(/[\\/:*?"<>|]/g, '_').slice(0, 40)
+      const safeFileName = attachment.name.replace(/[\\/:*?"<>|]/g, '_')
+      return {
+        order: index + 1,
+        taskId: task.id,
+        taskName: task.name,
+        assignee: task.assignee || '미배정',
+        tag: tagLabel,
+        submissionStatus: attachment.submissionStatus === 'submitted' ? 'submitted' : 'pending',
+        sourceUrl: mediaUrl(attachment.url),
+        targetPath: `02_업무별증빙/${safeTaskName}/${String(index + 1).padStart(3, '0')}_${tagLabel}_${safeFileName}`,
+      }
+    }),
+  }
   const approvalAuditLogs = tasks.flatMap(task => (task.approvalHistory || []).map(history => ({
     task,
     history,
@@ -2352,6 +2399,49 @@ export default function GovProjectDashboard() {
                     </div>
                   </div>
                   <p className="mt-6 text-center text-[11px] text-slate-400">본 표지는 Conception Job Flow 증빙 제출 패키지의 요약 표지로 생성되었습니다.</p>
+                </div>
+              </div>
+            </section>
+
+            <section className="executive-card rounded-xl p-5">
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold text-slate-700">ZIP PACKAGE BLUEPRINT</p>
+                  <h3 className="text-xl font-bold text-slate-900 mt-1">증빙 제출용 ZIP 구조</h3>
+                  <p className="text-sm text-slate-500 mt-2">실제 ZIP 다운로드 구현 전, 제출 패키지의 폴더 구조와 파일 매니페스트를 먼저 생성합니다.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => downloadJson(`conception-evidence-package-manifest-${todayKey}.json`, evidencePackageManifest)} className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white shadow-sm">매니페스트 JSON</button>
+                  <button type="button" onClick={() => downloadCsv(`conception-evidence-package-files-${todayKey}.csv`, evidencePackageManifest.files.map(file => ({ 순번: file.order, 업무명: file.taskName, 담당자: file.assignee, 태그: file.tag, 제출상태: file.submissionStatus, 저장경로: file.targetPath, 원본URL: file.sourceUrl })))} className="rounded-xl bg-white px-4 py-3 text-sm font-bold text-slate-700 border border-slate-200">파일목록 CSV</button>
+                </div>
+              </div>
+              <div className="mt-5 grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                  <h4 className="text-sm font-bold text-slate-900">패키지 구성</h4>
+                  <div className="mt-3 space-y-2">
+                    {evidencePackageManifest.folderStructure.map(folder => (
+                      <div key={folder} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-700">{folder}</div>
+                    ))}
+                  </div>
+                </div>
+                <div className="lg:col-span-2 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <h4 className="text-sm font-bold text-slate-900">ZIP 포함 예정 파일</h4>
+                    <span className="text-xs text-slate-500">{evidencePackageManifest.files.length}개</span>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {evidencePackageManifest.files.slice(0, 8).map(file => (
+                      <div key={`${file.taskId}-${file.order}`} className="rounded-lg bg-white px-3 py-2 text-xs">
+                        <div className="flex items-center justify-between gap-3">
+                          <strong className="truncate text-slate-800">{file.targetPath}</strong>
+                          <span className={`shrink-0 rounded-full px-2 py-1 font-bold ${file.submissionStatus === 'submitted' ? 'bg-indigo-50 text-indigo-700' : 'bg-amber-50 text-amber-700'}`}>{file.submissionStatus === 'submitted' ? '제출완료' : '미제출'}</span>
+                        </div>
+                        <div className="mt-1 truncate text-slate-400">{file.sourceUrl}</div>
+                      </div>
+                    ))}
+                    {evidencePackageManifest.files.length === 0 && <div className="rounded-lg bg-white p-6 text-center text-sm text-slate-500">패키지에 포함할 증빙 파일이 없습니다.</div>}
+                  </div>
+                  <p className="mt-3 text-xs text-slate-500">다음 단계에서 ZIP 라이브러리를 추가하면 위 매니페스트 기준으로 실제 압축 파일을 생성할 수 있습니다.</p>
                 </div>
               </div>
             </section>
