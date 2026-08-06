@@ -267,6 +267,24 @@ export default function GovProjectDashboard() {
     }
   }
 
+  const downloadCsv = (fileName: string, rows: Array<Record<string, string | number>>) => {
+    if (!rows.length) {
+      setNotice('내보낼 데이터가 없습니다.')
+      return
+    }
+    const headers = Object.keys(rows[0])
+    const escapeCell = (value: string | number) => `"${String(value ?? '').replace(/"/g, '""')}"`
+    const csv = [headers.join(','), ...rows.map(row => headers.map(header => escapeCell(row[header])).join(','))].join('\n')
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    link.click()
+    URL.revokeObjectURL(url)
+    setNotice(`${fileName} 파일을 생성했습니다.`)
+  }
+
   const renderTaskAttachments = (taskAttachments?: Attachment[], compact = false, task?: Task) => {
     if (!taskAttachments?.length) return null
     return (
@@ -832,6 +850,59 @@ export default function GovProjectDashboard() {
     })
     .sort((a, b) => new Date(b.attachment.uploadedAt).getTime() - new Date(a.attachment.uploadedAt).getTime())
   const largeVideoEvidenceCount = evidenceItems.filter(({ attachment }) => attachment.type === 'video' && attachment.size >= 10 * 1024 * 1024).length
+  const approvalAuditLogs = tasks.flatMap(task => (task.approvalHistory || []).map(history => ({
+    task,
+    history,
+    amount: (task.cashAmount ?? task.amount ?? 0) + (task.inKindAmount || 0),
+  }))).sort((a, b) => new Date(b.history.createdAt).getTime() - new Date(a.history.createdAt).getTime())
+  const approvalLogsThisMonth = approvalAuditLogs.filter(log => {
+    const date = new Date(log.history.createdAt)
+    const now = new Date()
+    return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth()
+  })
+  const approvalFirstRequestAt = (task: Task) => {
+    const requested = (task.approvalHistory || []).find(item => item.stage === 'requested')
+    return requested?.createdAt || task.createdAt
+  }
+  const completedApprovalDurations = budgetedTasks
+    .filter(task => ['approved', 'paid'].includes(task.approvalStage || ''))
+    .map(task => {
+      const end = task.approvedAt || [...(task.approvalHistory || [])].reverse().find(item => ['approved', 'paid'].includes(item.stage))?.createdAt
+      if (!end) return 0
+      return Math.max(0, new Date(end).getTime() - new Date(approvalFirstRequestAt(task)).getTime()) / 86400000
+    })
+    .filter(days => days > 0)
+  const averageApprovalDays = completedApprovalDurations.length ? Math.round((completedApprovalDurations.reduce((sum, days) => sum + days, 0) / completedApprovalDurations.length) * 10) / 10 : 0
+  const approvalActorRows = Array.from(new Set(approvalAuditLogs.map(log => log.history.actor))).map(actor => {
+    const actorLogs = approvalAuditLogs.filter(log => log.history.actor === actor)
+    return {
+      actor,
+      count: actorLogs.length,
+      approved: actorLogs.filter(log => ['approved', 'paid'].includes(log.history.stage)).length,
+      rejected: actorLogs.filter(log => log.history.stage === 'rejected').length,
+    }
+  }).sort((a, b) => b.count - a.count)
+  const rejectionReasonRows = approvalAuditLogs
+    .filter(log => log.history.stage === 'rejected')
+    .map(log => {
+      const memo = log.history.memo || log.task.rejectionReason || '사유 미입력'
+      const reasonType = memo.includes('증빙') ? '증빙 부족' : memo.includes('금액') || memo.includes('예산') ? '예산 검토' : memo.includes('마감') || memo.includes('일정') ? '일정 조정' : memo === '사유 미입력' ? '사유 미입력' : '기타 검토'
+      return { ...log, reasonType }
+    })
+  const rejectionReasonSummary = Array.from(new Set(rejectionReasonRows.map(row => row.reasonType))).map(reasonType => ({
+    reasonType,
+    count: rejectionReasonRows.filter(row => row.reasonType === reasonType).length,
+  })).sort((a, b) => b.count - a.count)
+  const approvalCsvRows = approvalAuditLogs.map(log => ({
+    업무명: log.task.name,
+    담당자: log.task.assignee || '미배정',
+    단계: BUDGET_APPROVAL_LABELS[log.history.stage],
+    처리자: log.history.actor,
+    처리일: new Date(log.history.createdAt).toLocaleString('ko-KR'),
+    금액만원: log.amount,
+    메모: log.history.memo || '',
+    반려사유: log.history.stage === 'rejected' ? (log.history.memo || log.task.rejectionReason || '') : '',
+  }))
   const aiBudgetAlerts = [
     pendingBudgetApprovals.length ? `결재 대기 예산 ${pendingBudgetApprovals.length}건을 먼저 승인해야 합니다.` : '결재 대기 병목은 낮습니다.',
     evidenceReadyCount < budgetedTasks.length ? `증빙이 없는 예산 항목 ${budgetedTasks.length - evidenceReadyCount}건이 있습니다.` : '모든 예산 항목에 증빙이 연결되어 있습니다.',
@@ -1704,6 +1775,70 @@ export default function GovProjectDashboard() {
                   )
                 })}
                 {approvalFilteredTasks.length === 0 && <div className="xl:col-span-3 rounded-xl border border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">선택한 결재 단계의 항목이 없습니다.</div>}
+              </div>
+            </section>
+
+            <section className="executive-card rounded-xl p-5">
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold text-indigo-700">AUDIT & APPROVAL ANALYTICS</p>
+                  <h3 className="text-xl font-bold text-slate-900 mt-1">결재 분석 · 감사 로그</h3>
+                  <p className="text-sm text-slate-500 mt-2">결재 이력을 감사 대응 가능한 로그로 정리하고, 처리 속도와 반려 유형을 분석합니다.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => downloadCsv(`conception-approval-audit-${todayKey}.csv`, approvalCsvRows)}
+                  className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white shadow-sm"
+                >
+                  결재 이력 CSV 내보내기
+                </button>
+              </div>
+              <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">전체 로그</div><div className="text-xl font-bold">{approvalAuditLogs.length}</div><div className="text-xs text-slate-400">건</div></div>
+                <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">이번 달 처리</div><div className="text-xl font-bold text-indigo-700">{approvalLogsThisMonth.length}</div><div className="text-xs text-slate-400">건</div></div>
+                <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">평균 처리</div><div className="text-xl font-bold text-teal-700">{averageApprovalDays}</div><div className="text-xs text-slate-400">일</div></div>
+                <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">반려 유형</div><div className="text-xl font-bold text-red-700">{rejectionReasonSummary.length}</div><div className="text-xs text-slate-400">종</div></div>
+              </div>
+              <div className="mt-5 grid grid-cols-1 xl:grid-cols-3 gap-4">
+                <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                  <h4 className="text-sm font-bold text-slate-900">결재자별 처리량</h4>
+                  <div className="mt-3 space-y-2">
+                    {approvalActorRows.slice(0, 5).map(row => (
+                      <div key={row.actor} className="rounded-lg bg-white px-3 py-2 text-xs">
+                        <div className="flex items-center justify-between"><strong>{row.actor}</strong><span>{row.count}건</span></div>
+                        <div className="mt-1 text-slate-500">승인/집행 {row.approved} · 반려 {row.rejected}</div>
+                      </div>
+                    ))}
+                    {approvalActorRows.length === 0 && <p className="text-xs text-slate-400">아직 결재 처리자가 없습니다.</p>}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                  <h4 className="text-sm font-bold text-slate-900">반려 사유 유형</h4>
+                  <div className="mt-3 space-y-2">
+                    {rejectionReasonSummary.slice(0, 5).map(row => (
+                      <div key={row.reasonType} className="rounded-lg bg-white px-3 py-2 text-xs">
+                        <div className="flex items-center justify-between"><strong>{row.reasonType}</strong><span className="text-red-700">{row.count}건</span></div>
+                      </div>
+                    ))}
+                    {rejectionReasonSummary.length === 0 && <p className="text-xs text-slate-400">반려 이력이 없습니다.</p>}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                  <h4 className="text-sm font-bold text-slate-900">최근 감사 로그</h4>
+                  <div className="mt-3 space-y-2">
+                    {approvalAuditLogs.slice(0, 5).map(log => (
+                      <div key={`${log.task.id}-${log.history.id}`} className="rounded-lg bg-white px-3 py-2 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                          <strong className="truncate">{log.task.name}</strong>
+                          <span className="shrink-0 text-slate-500">{BUDGET_APPROVAL_LABELS[log.history.stage]}</span>
+                        </div>
+                        <div className="mt-1 text-slate-400">{log.history.actor} · {new Date(log.history.createdAt).toLocaleString('ko-KR')}</div>
+                        {log.history.memo && <div className="mt-1 text-slate-600">{log.history.memo}</div>}
+                      </div>
+                    ))}
+                    {approvalAuditLogs.length === 0 && <p className="text-xs text-slate-400">아직 결재 감사 로그가 없습니다.</p>}
+                  </div>
+                </div>
               </div>
             </section>
 
