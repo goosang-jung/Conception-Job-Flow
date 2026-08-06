@@ -15,6 +15,10 @@ uploads/
 .env
 .env.local
 .env.*.local
+*.jks
+*.keystore
+android/keystore.properties
+android/release-signing.properties
 
 # Android generated files
 android/.gradle/

@@ -3,10 +3,15 @@ apply plugin: 'com.android.application'
 android {
     namespace "com.conception.jobflow"
     compileSdk rootProject.ext.compileSdkVersion
-    def releaseStoreFile = project.hasProperty('CJ_RELEASE_STORE_FILE') ? CJ_RELEASE_STORE_FILE : System.getenv('CJ_RELEASE_STORE_FILE')
-    def releaseStorePassword = project.hasProperty('CJ_RELEASE_STORE_PASSWORD') ? CJ_RELEASE_STORE_PASSWORD : System.getenv('CJ_RELEASE_STORE_PASSWORD')
-    def releaseKeyAlias = project.hasProperty('CJ_RELEASE_KEY_ALIAS') ? CJ_RELEASE_KEY_ALIAS : System.getenv('CJ_RELEASE_KEY_ALIAS')
-    def releaseKeyPassword = project.hasProperty('CJ_RELEASE_KEY_PASSWORD') ? CJ_RELEASE_KEY_PASSWORD : System.getenv('CJ_RELEASE_KEY_PASSWORD')
+    def signingProperties = new Properties()
+    def signingPropertiesFile = rootProject.file('keystore.properties')
+    if (signingPropertiesFile.exists()) {
+        signingProperties.load(new FileInputStream(signingPropertiesFile))
+    }
+    def releaseStoreFile = project.hasProperty('CJ_RELEASE_STORE_FILE') ? CJ_RELEASE_STORE_FILE : (signingProperties.getProperty('CJ_RELEASE_STORE_FILE') ?: System.getenv('CJ_RELEASE_STORE_FILE'))
+    def releaseStorePassword = project.hasProperty('CJ_RELEASE_STORE_PASSWORD') ? CJ_RELEASE_STORE_PASSWORD : (signingProperties.getProperty('CJ_RELEASE_STORE_PASSWORD') ?: System.getenv('CJ_RELEASE_STORE_PASSWORD'))
+    def releaseKeyAlias = project.hasProperty('CJ_RELEASE_KEY_ALIAS') ? CJ_RELEASE_KEY_ALIAS : (signingProperties.getProperty('CJ_RELEASE_KEY_ALIAS') ?: System.getenv('CJ_RELEASE_KEY_ALIAS'))
+    def releaseKeyPassword = project.hasProperty('CJ_RELEASE_KEY_PASSWORD') ? CJ_RELEASE_KEY_PASSWORD : (signingProperties.getProperty('CJ_RELEASE_KEY_PASSWORD') ?: System.getenv('CJ_RELEASE_KEY_PASSWORD'))
     defaultConfig {
         applicationId "com.conception.jobflow"
         minSdkVersion rootProject.ext.minSdkVersion
@@ -23,7 +28,7 @@ android {
     signingConfigs {
         release {
             if (releaseStoreFile) {
-                storeFile file(releaseStoreFile)
+                storeFile new File(releaseStoreFile).isAbsolute() ? file(releaseStoreFile) : rootProject.file(releaseStoreFile)
                 storePassword releaseStorePassword
                 keyAlias releaseKeyAlias
                 keyPassword releaseKeyPassword
