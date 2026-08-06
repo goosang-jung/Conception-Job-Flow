@@ -116,6 +116,14 @@ interface PersonalEntry {
   createdAt: string
 }
 
+interface DashboardBackupPayload {
+  version?: number
+  exportedAt?: string
+  tasks?: Task[]
+  team?: string[]
+  personalEntries?: PersonalEntry[]
+}
+
 const tasks: Map<string, Task> = new Map()
 const teamMembers: Set<string> = new Set(['정구상', '현연주', '김현수', '임주희', '김강민', '이상준', '최동이', '마세윤', '박준우'])
 const personalEntries: Map<string, PersonalEntry> = new Map()
@@ -229,6 +237,60 @@ app.get('/auth/session', (req, res) => res.json({ admin: adminTokens.has(readTok
 app.post('/auth/logout', requireAdmin, (req, res) => {
   adminTokens.delete(readToken(req))
   res.status(204).send()
+})
+
+app.get('/backup', requireAdmin, (_req, res) => {
+  res.json({
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    service: 'conception-job-flow',
+    storage: {
+      dataFile: DATA_FILE,
+      uploadDir: UPLOAD_DIR,
+      uploadPolicy: '이미지·동영상 원본 파일은 JSON에 포함하지 않습니다. data/uploads 폴더를 별도로 복사해 보관하세요.',
+    },
+    tasks: Array.from(tasks.values()),
+    team: Array.from(teamMembers),
+    personalEntries: Array.from(personalEntries.values()),
+    evidenceMetadataCount: Array.from(tasks.values()).reduce((sum, task) => sum + (task.attachments?.length || 0), 0),
+  })
+})
+
+app.post('/backup/restore', requireAdmin, (req, res) => {
+  const payload = req.body as DashboardBackupPayload
+  if (!Array.isArray(payload?.tasks) || !Array.isArray(payload?.team) || !Array.isArray(payload?.personalEntries)) {
+    return res.status(400).json({ error: '백업 파일 형식이 올바르지 않습니다.' })
+  }
+
+  tasks.clear()
+  payload.tasks.forEach(task => {
+    if (task?.id && task?.name) tasks.set(task.id, task)
+  })
+
+  teamMembers.clear()
+  payload.team
+    .filter(name => typeof name === 'string' && name.trim())
+    .forEach(name => teamMembers.add(name.trim()))
+
+  personalEntries.clear()
+  payload.personalEntries.forEach(entry => {
+    if (entry?.id && entry?.person) {
+      personalEntries.set(entry.id, {
+        ...entry,
+        approvalStatus: entry.approvalStatus || 'approved',
+        visibility: entry.visibility || 'summary',
+      })
+    }
+  })
+
+  persist()
+  res.json({
+    restoredAt: new Date().toISOString(),
+    tasks: tasks.size,
+    team: teamMembers.size,
+    personalEntries: personalEntries.size,
+    evidenceMetadataCount: Array.from(tasks.values()).reduce((sum, task) => sum + (task.attachments?.length || 0), 0),
+  })
 })
 
 app.use((req, res, next) => {

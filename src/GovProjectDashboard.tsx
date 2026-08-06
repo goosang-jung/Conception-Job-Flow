@@ -64,7 +64,7 @@ type AttachmentTag = 'quote' | 'receipt' | 'inspection' | 'meeting' | 'siteVideo
 
 interface EvidenceHistory {
   id: string
-  action: 'uploaded' | 'tagged' | 'noted' | 'downloaded' | 'deleted'
+  action: 'uploaded' | 'tagged' | 'noted' | 'submitted' | 'downloaded' | 'deleted'
   actor: string
   createdAt: string
   memo?: string
@@ -89,6 +89,14 @@ interface PersonalEntry {
   unit?: string
   visibility?: 'summary' | 'team' | 'admin'
   evidence?: string
+}
+
+interface DashboardBackupPayload {
+  version?: number
+  exportedAt?: string
+  tasks: Task[]
+  team: string[]
+  personalEntries: PersonalEntry[]
 }
 
 interface AppInstallPrompt extends Event {
@@ -225,6 +233,10 @@ export default function GovProjectDashboard() {
   const [submissionStartDate, setSubmissionStartDate] = useState(() => `${new Date().getFullYear()}-01-01`)
   const [submissionEndDate, setSubmissionEndDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [showManagementAdvanced, setShowManagementAdvanced] = useState(false)
+  const [backupLoading, setBackupLoading] = useState(false)
+  const [backupFileName, setBackupFileName] = useState('')
+  const [restorePayload, setRestorePayload] = useState<DashboardBackupPayload | null>(null)
+  const [restoreConfirmText, setRestoreConfirmText] = useState('')
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [uploadingAttachment, setUploadingAttachment] = useState(false)
@@ -370,6 +382,95 @@ export default function GovProjectDashboard() {
     link.click()
     URL.revokeObjectURL(url)
     setNotice(`${fileName} 파일을 생성했습니다.`)
+  }
+
+  const normalizeBackupPayload = (payload: unknown): DashboardBackupPayload => {
+    const candidate = payload as Partial<DashboardBackupPayload>
+    if (!Array.isArray(candidate.tasks) || !Array.isArray(candidate.team) || !Array.isArray(candidate.personalEntries)) {
+      throw new Error('백업 파일 형식이 올바르지 않습니다.')
+    }
+    return {
+      version: candidate.version || 1,
+      exportedAt: candidate.exportedAt,
+      tasks: candidate.tasks,
+      team: candidate.team,
+      personalEntries: candidate.personalEntries,
+    }
+  }
+
+  const downloadDashboardBackup = async () => {
+    if (!isAdmin) {
+      setShowLogin(true)
+      setError('데이터 백업은 관리자 인증 후 사용할 수 있습니다.')
+      return
+    }
+    setBackupLoading(true)
+    setError('')
+    try {
+      const res = await request('/backup')
+      const payload = await res.json()
+      downloadJson(`conception-job-flow-backup-${todayKey}.json`, payload)
+    } catch {
+      setError('백업 파일을 생성하지 못했습니다. 관리자 인증과 서버 상태를 확인해 주세요.')
+    } finally {
+      setBackupLoading(false)
+    }
+  }
+
+  const handleBackupFileSelect = async (file?: File) => {
+    if (!file) return
+    setError('')
+    try {
+      const parsed = JSON.parse(await file.text())
+      const payload = normalizeBackupPayload(parsed)
+      setRestorePayload(payload)
+      setBackupFileName(file.name)
+      setRestoreConfirmText('')
+      setNotice(`백업 파일을 확인했습니다. 업무 ${payload.tasks.length}건, 담당자 ${payload.team.length}명, 개인 기록 ${payload.personalEntries.length}건이 포함되어 있습니다.`)
+    } catch {
+      setRestorePayload(null)
+      setBackupFileName('')
+      setError('가져온 파일을 읽지 못했습니다. Conception Job Flow 백업 JSON인지 확인해 주세요.')
+    }
+  }
+
+  const restoreDashboardBackup = async () => {
+    if (!restorePayload) {
+      setError('먼저 백업 JSON 파일을 선택해 주세요.')
+      return
+    }
+    if (restoreConfirmText.trim() !== '복구') {
+      setError('복구 전 확인란에 “복구”를 입력해야 합니다.')
+      return
+    }
+    if (!window.confirm('현재 운영 데이터가 백업 파일 내용으로 교체됩니다. 계속할까요?')) return
+
+    setBackupLoading(true)
+    setError('')
+    try {
+      const res = await request('/backup/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(restorePayload),
+      })
+      const result = await res.json()
+      await loadTasks()
+      await loadTeam()
+      if (isAdmin) {
+        const details = await request('/personal-entries')
+        setPersonalEntries(await details.json())
+      } else {
+        await loadPersonalSummary()
+      }
+      setRestorePayload(null)
+      setBackupFileName('')
+      setRestoreConfirmText('')
+      setNotice(`복구 완료: 업무 ${result.tasks}건, 담당자 ${result.team}명, 개인 기록 ${result.personalEntries}건을 반영했습니다.`)
+    } catch {
+      setError('복구를 완료하지 못했습니다. 관리자 인증과 백업 파일 형식을 확인해 주세요.')
+    } finally {
+      setBackupLoading(false)
+    }
   }
 
   const downloadEvidenceZip = async () => {
@@ -2059,6 +2160,83 @@ export default function GovProjectDashboard() {
                 </button>
               </div>
             </div>
+
+            <section className="executive-card rounded-xl p-5">
+              <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-5">
+                <div>
+                  <p className="text-xs font-semibold text-sky-700">DATA RESILIENCE</p>
+                  <h3 className="text-xl font-bold text-slate-900 mt-1">데이터 백업 · 복구</h3>
+                  <p className="text-sm text-slate-500 mt-2">업무, 담당자, 개인 일정, 결재 이력, 증빙 메타데이터를 JSON으로 보관하고 필요 시 운영 데이터를 복구합니다.</p>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-center min-w-full xl:min-w-[520px]">
+                  <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">업무</div><div className="text-xl font-bold">{tasks.length}</div><div className="text-xs text-slate-400">건</div></div>
+                  <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">담당자</div><div className="text-xl font-bold text-teal-700">{team.length}</div><div className="text-xs text-slate-400">명</div></div>
+                  <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">개인 기록</div><div className="text-xl font-bold text-indigo-700">{personalEntries.length}</div><div className="text-xs text-slate-400">건</div></div>
+                  <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">증빙 메타</div><div className="text-xl font-bold text-amber-700">{evidenceItems.length}</div><div className="text-xs text-slate-400">개</div></div>
+                </div>
+              </div>
+              <div className="mt-5 grid grid-cols-1 xl:grid-cols-3 gap-4">
+                <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                  <h4 className="font-bold text-slate-900">1. JSON 백업 다운로드</h4>
+                  <p className="mt-2 text-sm text-slate-500">현재 운영 데이터를 공식 백업 파일로 내려받습니다. 제출 전, 대량 수정 전, 주간 마감 후 저장을 권장합니다.</p>
+                  <button
+                    type="button"
+                    onClick={() => void downloadDashboardBackup()}
+                    disabled={backupLoading}
+                    className="mt-4 w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white disabled:opacity-50"
+                  >
+                    {backupLoading ? '처리 중' : '전체 운영 데이터 JSON 다운로드'}
+                  </button>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <h4 className="font-bold text-slate-900">2. 백업 파일 가져오기 설계</h4>
+                  <p className="mt-2 text-sm text-slate-500">백업 JSON을 먼저 분석해 포함 데이터 수를 보여준 뒤, 확인 문구를 입력해야 복구할 수 있습니다.</p>
+                  <label className="mt-4 block">
+                    <span className="sr-only">백업 JSON 선택</span>
+                    <input
+                      type="file"
+                      accept="application/json,.json"
+                      onChange={event => void handleBackupFileSelect(event.target.files?.[0])}
+                      className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-sky-50 file:px-3 file:py-2 file:text-sm file:font-bold file:text-sky-700"
+                    />
+                  </label>
+                  {backupFileName && <p className="mt-2 text-xs font-semibold text-slate-500">선택 파일: {backupFileName}</p>}
+                </div>
+                <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+                  <h4 className="font-bold text-slate-900">3. 복구 전 확인</h4>
+                  {restorePayload ? (
+                    <div className="mt-3 space-y-3">
+                      <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                        <div className="rounded-lg bg-white p-2"><strong className="block text-slate-900">{restorePayload.tasks.length}</strong><span className="text-slate-400">업무</span></div>
+                        <div className="rounded-lg bg-white p-2"><strong className="block text-slate-900">{restorePayload.team.length}</strong><span className="text-slate-400">담당자</span></div>
+                        <div className="rounded-lg bg-white p-2"><strong className="block text-slate-900">{restorePayload.personalEntries.length}</strong><span className="text-slate-400">개인 기록</span></div>
+                      </div>
+                      <input
+                        value={restoreConfirmText}
+                        onChange={event => setRestoreConfirmText(event.target.value)}
+                        placeholder="복구 라고 입력"
+                        className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void restoreDashboardBackup()}
+                        disabled={backupLoading || restoreConfirmText.trim() !== '복구'}
+                        className="w-full rounded-xl bg-amber-700 px-4 py-3 text-sm font-bold text-white disabled:opacity-50"
+                      >
+                        백업 데이터로 복구 실행
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-sm text-slate-600">복구는 현재 데이터를 교체합니다. 먼저 백업 파일을 선택하면 복구 전 점검표가 표시됩니다.</p>
+                  )}
+                </div>
+              </div>
+              <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
+                <div className="font-bold text-slate-800">저장 위치와 백업 원칙</div>
+                <p className="mt-1">운영 데이터는 <code className="rounded bg-slate-100 px-1">data/dashboard.json</code>, 이미지·동영상 원본은 <code className="rounded bg-slate-100 px-1">data/uploads</code> 폴더에 저장됩니다.</p>
+                <p className="mt-1">JSON 백업에는 업로드 파일 자체가 포함되지 않으므로, 감사 제출 전이나 서버 이전 전에는 <code className="rounded bg-slate-100 px-1">data/uploads</code> 폴더를 별도로 복사하세요. 권장 주기는 매일 1회, 대량 수정 전/후, 제출 패키지 생성 직후입니다.</p>
+              </div>
+            </section>
 
             <section className="executive-card rounded-xl p-5">
               <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
