@@ -13,6 +13,7 @@ npm start
 - `data/uploads` 폴더 별도 복사
 - 증빙 ZIP 다운로드 테스트
 - 모바일 폭에서 업무, 달력, 관리 화면 확인
+- 휴대폰 APK 설치 테스트는 `APK_INSTALL_TEST_GUIDE.md` 기준으로 진행
 
 ## 2. Android 설치 패키지 완성
 
@@ -92,3 +93,11 @@ backup/
 - 감사 제출 패키지 생성 직후 백업
 - 대량 수정 전/후 백업
 - 서버 이전 시 `data/dashboard.json`과 `data/uploads`를 함께 이동
+
+## 6. 휴대폰 APK 설치 테스트
+
+정식 Release APK/AAB 생성 후에는 반드시 실제 Android 휴대폰에서 설치 테스트를 진행한다.
+
+- 테스트 문서: `APK_INSTALL_TEST_GUIDE.md`
+- 확인 대상: 첫 화면, 업무 목록, 달력, 관리 화면, 로그인/권한, 첨부파일, 증빙 ZIP
+- 주의: 휴대폰에서 `localhost`는 PC 서버가 아니므로, 서버 기능은 같은 Wi-Fi IP 또는 공개 서버 배포 후 테스트한다.
