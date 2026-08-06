@@ -25,6 +25,7 @@ interface Task {
   approvedBy?: string
   approvedAt?: string
   approvalHistory?: ApprovalHistory[]
+  budgetHistory?: BudgetHistory[]
   createdAt: string
   status: 'pending' | 'in-progress' | 'review' | 'blocked' | 'completed'
   attachments?: Attachment[]
@@ -41,6 +42,26 @@ interface ApprovalHistory {
   memo?: string
   actor: string
   createdAt: string
+}
+
+interface BudgetHistory {
+  id: string
+  actor: string
+  createdAt: string
+  before: {
+    budgetCategory?: BudgetCategory
+    cashAmount?: number
+    inKindAmount?: number
+    amount?: number
+    approvalStage?: Task['approvalStage']
+  }
+  after: {
+    budgetCategory?: BudgetCategory
+    cashAmount?: number
+    inKindAmount?: number
+    amount?: number
+    approvalStage?: Task['approvalStage']
+  }
 }
 
 interface Attachment {
@@ -854,7 +875,27 @@ export default function GovProjectDashboard() {
 
   const handleBudgetSave = async (id: string) => {
     try {
+      const currentTask = tasks.find(task => task.id === id)
       const totalAmount = budgetDraft.cashAmount + budgetDraft.inKindAmount
+      const budgetHistoryEntry: BudgetHistory | undefined = currentTask ? {
+        id: `${Date.now()}-budget`,
+        actor: '관리자',
+        createdAt: new Date().toISOString(),
+        before: {
+          budgetCategory: currentTask.budgetCategory,
+          cashAmount: currentTask.cashAmount ?? currentTask.amount ?? 0,
+          inKindAmount: currentTask.inKindAmount || 0,
+          amount: currentTask.amount || 0,
+          approvalStage: currentTask.approvalStage || 'requested',
+        },
+        after: {
+          budgetCategory: budgetDraft.budgetCategory,
+          cashAmount: budgetDraft.cashAmount,
+          inKindAmount: budgetDraft.inKindAmount,
+          amount: totalAmount || budgetDraft.amount,
+          approvalStage: budgetDraft.approvalStage,
+        },
+      } : undefined
       const res = await request(`/tasks/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -864,6 +905,7 @@ export default function GovProjectDashboard() {
           inKindAmount: budgetDraft.inKindAmount,
           amount: totalAmount || budgetDraft.amount,
           approvalStage: budgetDraft.approvalStage,
+          budgetHistory: budgetHistoryEntry && currentTask ? [...(currentTask.budgetHistory || []), budgetHistoryEntry] : currentTask?.budgetHistory,
         }),
       })
       const updated = await res.json()
@@ -1130,6 +1172,16 @@ export default function GovProjectDashboard() {
     return { ...month, requested, paid }
   })
   const monthlyBudgetMax = Math.max(...monthlyBudgetFlow.map(month => Math.max(month.requested, month.paid)), 1)
+  const todayDate = new Date()
+  const currentMonthIndex = todayDate.getMonth()
+  const monthsElapsed = Math.max(currentMonthIndex + 1, 1)
+  const averagePaidPerMonth = Math.round(paidBudgetAmount / monthsElapsed)
+  const projectedYearEndPaid = Math.min(nationalRndBudgetTotal, averagePaidPerMonth * 12)
+  const remainingBudgetAmount = Math.max(nationalRndBudgetTotal - paidBudgetAmount, 0)
+  const budgetExecutionRate = nationalRndBudgetTotal ? Math.round((paidBudgetAmount / nationalRndBudgetTotal) * 100) : 0
+  const projectedExecutionRate = nationalRndBudgetTotal ? Math.round((projectedYearEndPaid / nationalRndBudgetTotal) * 100) : 0
+  const budgetHistoryLogs = budgetedTasks.flatMap(task => (task.budgetHistory || []).map(history => ({ task, history })))
+    .sort((a, b) => new Date(b.history.createdAt).getTime() - new Date(a.history.createdAt).getTime())
   const evidenceReadyCount = budgetedTasks.filter(task => task.attachments?.length).length
   const evidenceItems = tasks.flatMap(task => (task.attachments || []).map(attachment => ({ task, attachment })))
   const missingEvidenceTasks = budgetedTasks.filter(task => !(task.attachments?.length))
@@ -1323,6 +1375,38 @@ export default function GovProjectDashboard() {
       ? { tone: 'amber', title: '예산 편중 위험', body: `${budgetConcentrationRisk.label} 세목이 전체 예산의 ${Math.round((budgetConcentrationRisk.total / nationalRndBudgetTotal) * 100)}%를 차지합니다. 세목 편중 사유를 남겨두세요.` }
       : { tone: 'teal', title: '예산 편중', body: '세목별 예산 분산은 안정적입니다.' },
   ] as Array<{ tone: 'teal' | 'amber' | 'red'; title: string; body: string }>
+
+  const runAiAdviceAction = (title: string) => {
+    if (title.includes('결재')) {
+      setApprovalFilter('requested')
+      navigateToView('management')
+      setNotice('AI 조언에 따라 결재요청 항목을 먼저 보도록 이동했습니다.')
+      return
+    }
+    if (title.includes('증빙')) {
+      setEvidenceFilter('missing')
+      setShowManagementAdvanced(true)
+      navigateToView('management')
+      setNotice('AI 조언에 따라 증빙 누락 항목을 확인하도록 이동했습니다.')
+      return
+    }
+    if (title.includes('마감')) {
+      navigateToView('calendar')
+      setNotice('AI 조언에 따라 마감 일정 달력으로 이동했습니다.')
+      return
+    }
+    if (title.includes('담당자')) {
+      navigateToView('people')
+      setNotice('AI 조언에 따라 팀 현황 화면으로 이동했습니다.')
+      return
+    }
+    if (title.includes('예산')) {
+      navigateToView('management')
+      setNotice('AI 조언에 따라 예산관리 화면으로 이동했습니다.')
+      return
+    }
+    navigateToView('management')
+  }
 
   const getPriorityColor = (rank: number) => {
     if (rank === 1) return 'executive-card before:bg-amber-500'
@@ -2241,6 +2325,38 @@ export default function GovProjectDashboard() {
             <section className="executive-card rounded-xl p-5">
               <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
                 <div>
+                  <p className="text-xs font-semibold text-slate-700">ACCESS GOVERNANCE</p>
+                  <h3 className="text-xl font-bold text-slate-900 mt-1">권한 체계 운영 기준</h3>
+                  <p className="text-sm text-slate-500 mt-2">현재 앱은 관리자 인증을 기준으로 위험 기능을 잠그고, 다음 단계에서 역할별 계정으로 확장할 수 있게 정리했습니다.</p>
+                </div>
+                <span className={`rounded-full px-3 py-2 text-xs font-bold ${isAdmin ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{isAdmin ? '관리자 모드 활성' : '일반 조회 모드'}</span>
+              </div>
+              <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-3">
+                {[
+                  ['일반 사용자', '조회 중심', '업무·달력·팀 간접 현황을 확인하고, 민감한 개인 메모와 삭제/복구 기능은 보지 않습니다.'],
+                  ['결재자', '승인 중심', '결재 대기, 반려, 증빙 누락, 고액 예산 병목을 우선 처리하는 역할로 확장합니다.'],
+                  ['관리자', '운영 통제', '업무 수정, 증빙 삭제, 백업/복구, 팀·개인 기록 관리, 제출 패키징을 수행합니다.'],
+                ].map(([role, scope, description]) => (
+                  <div key={role} className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <h4 className="font-bold text-slate-900">{role}</h4>
+                      <span className="rounded-full bg-white px-2 py-1 text-xs font-bold text-slate-600">{scope}</span>
+                    </div>
+                    <p className="mt-2 text-sm leading-relaxed text-slate-500">{description}</p>
+                  </div>
+                ))}
+              </div>
+              {!isAdmin && (
+                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/70 p-4 text-sm text-amber-800">
+                  백업/복구, 삭제, 예산 수정, 결재 처리 같은 운영 위험 기능은 관리자 인증 후 사용할 수 있습니다.
+                  <button type="button" onClick={() => setShowLogin(true)} className="ml-2 rounded-lg bg-amber-700 px-3 py-2 text-xs font-bold text-white">관리자 인증</button>
+                </div>
+              )}
+            </section>
+
+            <section className="executive-card rounded-xl p-5">
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                <div>
                   <p className="text-xs font-semibold text-amber-700">APPROVAL CONTROL</p>
                   <h3 className="text-xl font-bold text-slate-900 mt-1">결재 관제 패널</h3>
                   <p className="text-sm text-slate-500 mt-2">작성부터 집행완료까지 단계별로 필터링하고, 반려 사유·승인 메모·결재 이력을 한 화면에서 추적합니다.</p>
@@ -2700,6 +2816,50 @@ export default function GovProjectDashboard() {
                   <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">집행완료</div><div className="text-xl font-bold text-emerald-700">{paidBudgetAmount}</div><div className="text-xs text-slate-400">만원</div></div>
                   <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">결재대기</div><div className="text-xl font-bold text-amber-700">{pendingBudgetApprovals.length}</div><div className="text-xs text-slate-400">건</div></div>
                 </div>
+                <div className="mt-5 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <div className="rounded-xl border border-teal-200 bg-teal-50/70 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900">예산 집행 예측</h4>
+                        <p className="mt-1 text-xs text-slate-600">현재 월까지의 집행 속도를 기준으로 연말 예상 집행률을 계산합니다.</p>
+                      </div>
+                      <span className={`rounded-full px-2 py-1 text-xs font-bold ${projectedExecutionRate < 60 ? 'bg-red-100 text-red-700' : projectedExecutionRate < 85 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>{projectedExecutionRate}% 예상</span>
+                    </div>
+                    <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
+                      <div className="rounded-lg bg-white p-3"><strong className="block text-lg text-slate-900">{budgetExecutionRate}%</strong><span className="text-slate-400">현재 집행률</span></div>
+                      <div className="rounded-lg bg-white p-3"><strong className="block text-lg text-teal-700">{remainingBudgetAmount}</strong><span className="text-slate-400">잔액 만원</span></div>
+                      <div className="rounded-lg bg-white p-3"><strong className="block text-lg text-sky-700">{averagePaidPerMonth}</strong><span className="text-slate-400">월평균 만원</span></div>
+                    </div>
+                    <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
+                      <div className="h-full rounded-full bg-gradient-to-r from-teal-700 to-sky-500" style={{ width: `${Math.min(100, projectedExecutionRate)}%` }} />
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900">예산 변경 이력</h4>
+                        <p className="mt-1 text-xs text-slate-500">예산 세목, 현금/현물, 결재 단계 변경을 감사 추적용으로 남깁니다.</p>
+                      </div>
+                      <span className="rounded-full bg-white px-2 py-1 text-xs font-bold text-slate-600">{budgetHistoryLogs.length}건</span>
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {budgetHistoryLogs.slice(0, 4).map(({ task, history }) => (
+                        <div key={history.id} className="rounded-lg bg-white px-3 py-2 text-xs">
+                          <div className="flex items-center justify-between gap-2">
+                            <strong className="truncate text-slate-800">{task.name}</strong>
+                            <span className="shrink-0 text-slate-400">{new Date(history.createdAt).toLocaleDateString('ko-KR')}</span>
+                          </div>
+                          <div className="mt-1 text-slate-500">
+                            {BUDGET_CATEGORIES.find(category => category.id === history.before.budgetCategory)?.label || '미분류'} → {BUDGET_CATEGORIES.find(category => category.id === history.after.budgetCategory)?.label || '미분류'}
+                            {' · '}현금 {history.before.cashAmount || 0}→{history.after.cashAmount || 0}
+                            {' · '}현물 {history.before.inKindAmount || 0}→{history.after.inKindAmount || 0}
+                          </div>
+                        </div>
+                      ))}
+                      {budgetHistoryLogs.length === 0 && <div className="rounded-lg bg-white p-5 text-center text-sm text-slate-400">아직 기록된 예산 변경 이력이 없습니다. 예산 수정 후 저장하면 자동으로 남습니다.</div>}
+                    </div>
+                  </div>
+                </div>
                 <div className="mt-5 grid grid-cols-1 xl:grid-cols-2 gap-4">
                   <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
                     <div className="flex items-center justify-between gap-3">
@@ -2805,7 +2965,16 @@ export default function GovProjectDashboard() {
                             advice.tone === 'amber' ? 'border-amber-200 bg-white text-slate-700' :
                             'border-teal-200 bg-teal-50 text-teal-800'
                           }`}>
-                            <div className="font-bold">{advice.title}</div>
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="font-bold">{advice.title}</div>
+                              <button
+                                type="button"
+                                onClick={() => runAiAdviceAction(advice.title)}
+                                className="shrink-0 rounded-full bg-white/80 px-2 py-1 text-[11px] font-bold text-slate-700 shadow-sm"
+                              >
+                                바로 실행
+                              </button>
+                            </div>
                             <p className="mt-1 leading-relaxed">{advice.body}</p>
                           </div>
                         ))}

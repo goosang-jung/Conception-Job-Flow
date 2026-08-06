@@ -51,6 +51,7 @@ interface Task {
   approvedBy?: string
   approvedAt?: string
   approvalHistory?: ApprovalHistory[]
+  budgetHistory?: BudgetHistory[]
   createdAt: string
   status: 'pending' | 'in-progress' | 'review' | 'blocked' | 'completed'
   attachments?: Attachment[]
@@ -62,6 +63,26 @@ interface ApprovalHistory {
   memo?: string
   actor: string
   createdAt: string
+}
+
+interface BudgetHistory {
+  id: string
+  actor: string
+  createdAt: string
+  before: {
+    budgetCategory?: Task['budgetCategory']
+    cashAmount?: number
+    inKindAmount?: number
+    amount?: number
+    approvalStage?: Task['approvalStage']
+  }
+  after: {
+    budgetCategory?: Task['budgetCategory']
+    cashAmount?: number
+    inKindAmount?: number
+    amount?: number
+    approvalStage?: Task['approvalStage']
+  }
 }
 
 interface Attachment {
