@@ -224,6 +224,7 @@ export default function GovProjectDashboard() {
   const [submissionOwner, setSubmissionOwner] = useState('관리자')
   const [submissionStartDate, setSubmissionStartDate] = useState(() => `${new Date().getFullYear()}-01-01`)
   const [submissionEndDate, setSubmissionEndDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [showManagementAdvanced, setShowManagementAdvanced] = useState(false)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [uploadingAttachment, setUploadingAttachment] = useState(false)
@@ -2044,6 +2045,19 @@ export default function GovProjectDashboard() {
                   <div className="executive-card-subtle rounded-lg px-4 py-3"><div className="text-xs text-slate-500">평균 고과</div><div className="font-bold">{managementRows.length ? Math.round(managementRows.reduce((sum, row) => sum + row.annualScore, 0) / managementRows.length) : 0}점</div></div>
                 </div>
               </div>
+              <div className="mt-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+                <div className="text-xs text-slate-600">
+                  기본 표시: <strong>결재 관제</strong> · <strong>증빙 제출</strong> · <strong>예산관리</strong>
+                  <span className="ml-2 text-slate-400">보조 분석/자료실/평가 섹션은 필요할 때 펼칩니다.</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowManagementAdvanced(prev => !prev)}
+                  className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white"
+                >
+                  {showManagementAdvanced ? '보조 섹션 접기' : '보조 섹션 펼치기'}
+                </button>
+              </div>
             </div>
 
             <section className="executive-card rounded-xl p-5">
@@ -2146,7 +2160,7 @@ export default function GovProjectDashboard() {
               </div>
             </section>
 
-            <section className="executive-card rounded-xl p-5">
+            <section className={`${showManagementAdvanced ? '' : 'hidden'} executive-card rounded-xl p-5`}>
               <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
                 <div>
                   <p className="text-xs font-semibold text-indigo-700">AUDIT & APPROVAL ANALYTICS</p>
@@ -2210,7 +2224,7 @@ export default function GovProjectDashboard() {
               </div>
             </section>
 
-            <section className="executive-card rounded-xl p-5">
+            <section className={`${showManagementAdvanced ? '' : 'hidden'} executive-card rounded-xl p-5`}>
               <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
                 <div>
                   <p className="text-xs font-semibold text-teal-700">EVIDENCE LIBRARY</p>
@@ -2386,7 +2400,7 @@ export default function GovProjectDashboard() {
               </div>
             </section>
 
-            <section className="executive-card rounded-xl p-5">
+            <section className={`${showManagementAdvanced ? '' : 'hidden'} executive-card rounded-xl p-5`}>
               <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
                 <div>
                   <p className="text-xs font-semibold text-indigo-700">PDF COVER SHEET</p>
@@ -2447,7 +2461,7 @@ export default function GovProjectDashboard() {
               </div>
             </section>
 
-            <section className="executive-card rounded-xl p-5">
+            <section className={`${showManagementAdvanced ? '' : 'hidden'} executive-card rounded-xl p-5`}>
               <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
                 <div>
                   <p className="text-xs font-semibold text-slate-700">ZIP PACKAGE BLUEPRINT</p>
@@ -2645,7 +2659,7 @@ export default function GovProjectDashboard() {
                 </div>
               </section>
 
-              <section className="executive-card rounded-xl p-5">
+              <section className={`${showManagementAdvanced ? '' : 'hidden'} executive-card rounded-xl p-5`}>
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-xs font-semibold text-teal-700">IP PORTFOLIO</p>
@@ -2672,7 +2686,7 @@ export default function GovProjectDashboard() {
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-              <section className="executive-card rounded-xl p-5">
+              <section className={`${showManagementAdvanced ? '' : 'hidden'} executive-card rounded-xl p-5`}>
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-xs font-semibold text-teal-700">PROGRAM & TRAINING</p>
@@ -2697,7 +2711,7 @@ export default function GovProjectDashboard() {
                 </div>
               </section>
 
-              <section className="executive-card rounded-xl p-5">
+              <section className={`${showManagementAdvanced ? '' : 'hidden'} executive-card rounded-xl p-5`}>
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-xs font-semibold text-teal-700">EVALUATION</p>
