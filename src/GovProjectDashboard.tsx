@@ -217,6 +217,12 @@ export default function GovProjectDashboard() {
   const [approvalFilter, setApprovalFilter] = useState<'all' | NonNullable<Task['approvalStage']>>('all')
   const [evidenceFilter, setEvidenceFilter] = useState<'all' | AttachmentTag | 'missing'>('all')
   const [evidenceSearch, setEvidenceSearch] = useState('')
+  const [submissionPackageTitle, setSubmissionPackageTitle] = useState('국가연구개발자금 증빙 제출 패키지')
+  const [submissionOrganization, setSubmissionOrganization] = useState('Conception')
+  const [submissionProjectName, setSubmissionProjectName] = useState('Conception Job Flow 운영 과제')
+  const [submissionOwner, setSubmissionOwner] = useState('관리자')
+  const [submissionStartDate, setSubmissionStartDate] = useState(() => `${new Date().getFullYear()}-01-01`)
+  const [submissionEndDate, setSubmissionEndDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [uploadingAttachment, setUploadingAttachment] = useState(false)
@@ -992,6 +998,7 @@ export default function GovProjectDashboard() {
   const evidenceReadyForSubmission = evidenceSubmissionRows.filter(row => row.readyScore >= 70).length
   const evidenceSubmissionRate = evidenceSubmissionRows.length ? Math.round((evidenceReadyForSubmission / evidenceSubmissionRows.length) * 100) : 0
   const submittedEvidenceCount = evidenceItems.filter(({ attachment }) => attachment.submissionStatus === 'submitted').length
+  const unsubmittedEvidenceCount = Math.max(evidenceItems.length - submittedEvidenceCount, 0)
   const evidenceTagReadiness = ATTACHMENT_TAGS.filter(tag => tag.id !== 'other').map(tag => {
     const count = evidenceItems.filter(({ attachment }) => attachment.tag === tag.id).length
     return { ...tag, count, rate: evidenceItems.length ? Math.round((count / evidenceItems.length) * 100) : 0 }
@@ -2284,6 +2291,67 @@ export default function GovProjectDashboard() {
                     ))}
                     {evidenceSubmissionRows.length === 0 && <div className="md:col-span-2 rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">체크할 예산 업무가 없습니다.</div>}
                   </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="executive-card rounded-xl p-5">
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold text-indigo-700">PDF COVER SHEET</p>
+                  <h3 className="text-xl font-bold text-slate-900 mt-1">제출용 PDF 표지</h3>
+                  <p className="text-sm text-slate-500 mt-2">브라우저 인쇄 기능으로 PDF 저장이 가능한 감사 제출용 표지 화면입니다.</p>
+                </div>
+                <button type="button" onClick={() => window.print()} className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white shadow-sm">
+                  PDF로 저장/인쇄
+                </button>
+              </div>
+              <div className="mt-5 grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                  <h4 className="text-sm font-bold text-slate-900">표지 정보</h4>
+                  <div className="mt-3 space-y-3">
+                    <input aria-label="제출 패키지 제목" value={submissionPackageTitle} onChange={e => setSubmissionPackageTitle(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                    <input aria-label="기관명" value={submissionOrganization} onChange={e => setSubmissionOrganization(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                    <input aria-label="과제명" value={submissionProjectName} onChange={e => setSubmissionProjectName(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                    <input aria-label="제출자" value={submissionOwner} onChange={e => setSubmissionOwner(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input aria-label="제출 대상 시작일" type="date" value={submissionStartDate} onChange={e => setSubmissionStartDate(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                      <input aria-label="제출 대상 종료일" type="date" value={submissionEndDate} onChange={e => setSubmissionEndDate(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                    </div>
+                  </div>
+                </div>
+                <div className="lg:col-span-2 rounded-xl border border-slate-200 bg-white p-6 shadow-sm print:shadow-none">
+                  <div className="border-b border-slate-200 pb-5 text-center">
+                    <p className="text-xs font-bold tracking-[0.3em] text-slate-400">AUDIT EVIDENCE PACKAGE</p>
+                    <h1 className="mt-4 text-2xl font-black text-slate-950">{submissionPackageTitle}</h1>
+                    <p className="mt-2 text-sm text-slate-500">{submissionProjectName}</p>
+                  </div>
+                  <div className="mt-6 grid grid-cols-2 gap-3 text-sm">
+                    <div className="rounded-lg bg-slate-50 p-3"><div className="text-xs text-slate-400">기관명</div><strong>{submissionOrganization}</strong></div>
+                    <div className="rounded-lg bg-slate-50 p-3"><div className="text-xs text-slate-400">제출자</div><strong>{submissionOwner}</strong></div>
+                    <div className="rounded-lg bg-slate-50 p-3"><div className="text-xs text-slate-400">대상 기간</div><strong>{submissionStartDate} ~ {submissionEndDate}</strong></div>
+                    <div className="rounded-lg bg-slate-50 p-3"><div className="text-xs text-slate-400">제출일</div><strong>{todayKey}</strong></div>
+                  </div>
+                  <div className="mt-6 grid grid-cols-3 gap-3 text-center">
+                    <div className="rounded-xl border border-slate-200 p-4"><div className="text-xs text-slate-400">전체 증빙</div><div className="mt-1 text-2xl font-black">{evidenceItems.length}</div></div>
+                    <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4"><div className="text-xs text-indigo-500">제출 완료</div><div className="mt-1 text-2xl font-black text-indigo-700">{submittedEvidenceCount}</div></div>
+                    <div className="rounded-xl border border-red-200 bg-red-50 p-4"><div className="text-xs text-red-500">미제출</div><div className="mt-1 text-2xl font-black text-red-700">{unsubmittedEvidenceCount}</div></div>
+                  </div>
+                  <div className="mt-6">
+                    <h2 className="text-sm font-bold text-slate-900">업무별 증빙 제출 현황</h2>
+                    <div className="mt-3 overflow-hidden rounded-lg border border-slate-200">
+                      <div className="grid grid-cols-4 bg-slate-950 px-3 py-2 text-xs font-bold text-white"><div>업무</div><div className="text-right">전체</div><div className="text-right">제출</div><div className="text-right">준비율</div></div>
+                      {evidenceSubmissionRows.slice(0, 8).map(row => (
+                        <div key={row.task.id} className="grid grid-cols-4 border-t border-slate-100 px-3 py-2 text-xs">
+                          <div className="truncate font-semibold">{row.task.name}</div>
+                          <div className="text-right">{row.taskAttachments.length}</div>
+                          <div className="text-right">{row.submittedCount}</div>
+                          <div className="text-right">{row.readyScore}%</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <p className="mt-6 text-center text-[11px] text-slate-400">본 표지는 Conception Job Flow 증빙 제출 패키지의 요약 표지로 생성되었습니다.</p>
                 </div>
               </div>
             </section>
