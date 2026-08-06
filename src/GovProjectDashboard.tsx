@@ -899,6 +899,24 @@ export default function GovProjectDashboard() {
   const evidenceMissingApprovalCount = approvalQueueTasks.filter(task => !(task.attachments?.length)).length
   const approvalBottleneckAmount = approvalQueueTasks.reduce((sum, task) => sum + (task.cashAmount ?? task.amount ?? 0) + (task.inKindAmount || 0), 0)
   const paidBudgetAmount = budgetedTasks.filter(task => (task.approvalStage || '') === 'paid').reduce((sum, task) => sum + (task.cashAmount ?? task.amount ?? 0) + (task.inKindAmount || 0), 0)
+  const budgetMaxCategoryTotal = Math.max(...budgetCategoryRows.map(row => row.total), 1)
+  const cashRatio = nationalRndBudgetTotal ? Math.round((totalCashAmount / nationalRndBudgetTotal) * 100) : 0
+  const inKindRatio = nationalRndBudgetTotal ? Math.round((totalInKindAmount / nationalRndBudgetTotal) * 100) : 0
+  const approvalAmountRows = APPROVAL_STAGE_ORDER.map(stage => {
+    const stageTasks = budgetedTasks.filter(task => (task.approvalStage || 'requested') === stage)
+    const total = stageTasks.reduce((sum, task) => sum + (task.cashAmount ?? task.amount ?? 0) + (task.inKindAmount || 0), 0)
+    return { stage, label: BUDGET_APPROVAL_LABELS[stage], count: stageTasks.length, total }
+  })
+  const approvalMaxAmount = Math.max(...approvalAmountRows.map(row => row.total), 1)
+  const monthlyBudgetFlow = yearlyMonths.map(month => {
+    const monthBudgetTasks = month.tasks.filter(task => (task.amount || 0) > 0 || (task.cashAmount || 0) > 0 || (task.inKindAmount || 0) > 0)
+    const requested = monthBudgetTasks.reduce((sum, task) => sum + (task.cashAmount ?? task.amount ?? 0) + (task.inKindAmount || 0), 0)
+    const paid = monthBudgetTasks
+      .filter(task => (task.approvalStage || '') === 'paid')
+      .reduce((sum, task) => sum + (task.cashAmount ?? task.amount ?? 0) + (task.inKindAmount || 0), 0)
+    return { ...month, requested, paid }
+  })
+  const monthlyBudgetMax = Math.max(...monthlyBudgetFlow.map(month => Math.max(month.requested, month.paid)), 1)
   const evidenceReadyCount = budgetedTasks.filter(task => task.attachments?.length).length
   const evidenceItems = tasks.flatMap(task => (task.attachments || []).map(attachment => ({ task, attachment })))
   const missingEvidenceTasks = budgetedTasks.filter(task => !(task.attachments?.length))
@@ -2174,6 +2192,80 @@ export default function GovProjectDashboard() {
                   <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">현물</div><div className="text-xl font-bold text-sky-700">{totalInKindAmount}</div><div className="text-xs text-slate-400">만원</div></div>
                   <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">집행완료</div><div className="text-xl font-bold text-emerald-700">{paidBudgetAmount}</div><div className="text-xs text-slate-400">만원</div></div>
                   <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">결재대기</div><div className="text-xl font-bold text-amber-700">{pendingBudgetApprovals.length}</div><div className="text-xs text-slate-400">건</div></div>
+                </div>
+                <div className="mt-5 grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <h4 className="text-sm font-bold text-slate-900">세목별 예산 막대</h4>
+                      <span className="text-xs text-slate-400">현금+현물 기준</span>
+                    </div>
+                    <div className="mt-4 space-y-3">
+                      {budgetCategoryRows.map(row => (
+                        <div key={row.id}>
+                          <div className="mb-1 flex items-center justify-between text-xs">
+                            <span className="font-semibold text-slate-700">{row.label}</span>
+                            <span className="text-slate-500">{row.total}만원</span>
+                          </div>
+                          <div className="h-3 overflow-hidden rounded-full bg-slate-200">
+                            <div className="h-full rounded-full bg-gradient-to-r from-teal-700 via-sky-600 to-amber-500" style={{ width: `${Math.max(4, Math.round((row.total / budgetMaxCategoryTotal) * 100))}%` }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <h4 className="text-sm font-bold text-slate-900">현금/현물 비율</h4>
+                      <span className="text-xs text-slate-400">{nationalRndBudgetTotal}만원</span>
+                    </div>
+                    <div className="mt-4 overflow-hidden rounded-2xl border border-white bg-slate-200 shadow-inner">
+                      <div className="flex h-14 text-xs font-bold text-white">
+                        <div className="flex items-center justify-center bg-teal-700" style={{ width: `${cashRatio}%` }}>현금 {cashRatio}%</div>
+                        <div className="flex items-center justify-center bg-sky-700" style={{ width: `${inKindRatio}%` }}>현물 {inKindRatio}%</div>
+                      </div>
+                    </div>
+                    <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                      <div className="rounded-lg bg-white p-3"><div className="text-xs text-slate-400">현금</div><strong className="text-teal-700">{totalCashAmount}만원</strong></div>
+                      <div className="rounded-lg bg-white p-3"><div className="text-xs text-slate-400">현물</div><strong className="text-sky-700">{totalInKindAmount}만원</strong></div>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <h4 className="text-sm font-bold text-slate-900">결재 단계별 금액</h4>
+                      <span className="text-xs text-slate-400">단계별 병목 확인</span>
+                    </div>
+                    <div className="mt-4 space-y-3">
+                      {approvalAmountRows.map(row => (
+                        <div key={row.stage}>
+                          <div className="mb-1 flex items-center justify-between text-xs">
+                            <span className="font-semibold text-slate-700">{row.label} · {row.count}건</span>
+                            <span className="text-slate-500">{row.total}만원</span>
+                          </div>
+                          <div className="h-3 overflow-hidden rounded-full bg-slate-200">
+                            <div className="h-full rounded-full bg-gradient-to-r from-amber-500 to-slate-900" style={{ width: `${Math.max(row.total ? 4 : 0, Math.round((row.total / approvalMaxAmount) * 100))}%` }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <h4 className="text-sm font-bold text-slate-900">월별 집행 추이</h4>
+                      <span className="text-xs text-slate-400">요청/집행 비교</span>
+                    </div>
+                    <div className="mt-4 flex h-40 items-end gap-2">
+                      {monthlyBudgetFlow.map(month => (
+                        <div key={month.month} className="flex flex-1 flex-col items-center justify-end gap-1">
+                          <div className="flex h-28 w-full items-end justify-center gap-1">
+                            <div title={`${month.label} 요청 ${month.requested}만원`} className="w-2 rounded-t bg-amber-400" style={{ height: `${Math.max(month.requested ? 6 : 0, Math.round((month.requested / monthlyBudgetMax) * 100))}%` }} />
+                            <div title={`${month.label} 집행 ${month.paid}만원`} className="w-2 rounded-t bg-teal-700" style={{ height: `${Math.max(month.paid ? 6 : 0, Math.round((month.paid / monthlyBudgetMax) * 100))}%` }} />
+                          </div>
+                          <span className="text-[10px] text-slate-400">{month.month + 1}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-2 flex gap-3 text-xs text-slate-500"><span>● 요청</span><span className="text-teal-700">● 집행</span></div>
+                  </div>
                 </div>
                 <div className="mt-5 grid grid-cols-1 lg:grid-cols-7 gap-4">
                   <div className="lg:col-span-4 overflow-hidden rounded-xl border border-slate-200">
