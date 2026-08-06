@@ -32,6 +32,22 @@ gradlew assembleDebug
 - Release APK 또는 AAB 빌드
 - 실제 휴대폰 설치 테스트
 
+정식 서명 빌드 명령:
+
+```bash
+npm run app:release:apk
+npm run app:release:aab
+```
+
+서명 설정은 환경변수 또는 `android/gradle.properties`에 둔다.
+
+```text
+CJ_RELEASE_STORE_FILE=키스토어경로
+CJ_RELEASE_STORE_PASSWORD=키스토어비밀번호
+CJ_RELEASE_KEY_ALIAS=키별칭
+CJ_RELEASE_KEY_PASSWORD=키비밀번호
+```
+
 ## 3. Release 배포 정리
 
 GitHub Release에는 다음 파일과 내용을 포함한다.
@@ -53,12 +69,12 @@ GitHub Release에는 다음 파일과 내용을 포함한다.
 
 ## 4. 대용량 ZIP/영상 최적화 기준
 
-현재 앱은 증빙 ZIP을 브라우저에서 생성한다. 실제 운영에서 영상이 많아지면 아래 기준을 적용한다.
+현재 앱은 브라우저 ZIP 생성과 서버 ZIP 생성을 모두 지원한다. 실제 운영에서 영상이 많아지면 서버 ZIP 생성을 우선 사용한다.
 
 - 30MB 초과 영상은 서버 업로드 제한에 걸리므로 사전 압축
 - 10MB 이상 영상은 “대용량 영상”으로 별도 표시
 - 제출 ZIP 생성 전 불필요한 원본 영상 삭제 또는 별도 보관
-- 장기적으로는 서버 ZIP 생성 API로 전환
+- 서버 ZIP 생성 API: `/evidence-package.zip`
 - 영상 썸네일 생성 및 원본/압축본 분리 저장 검토
 
 권장 폴더 보관 구조:

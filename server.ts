@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid'
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
+import JSZip from 'jszip'
 
 const app = express()
 app.set('trust proxy', 1)
@@ -104,7 +105,7 @@ interface Attachment {
 
 interface EvidenceHistory {
   id: string
-  action: 'uploaded' | 'tagged' | 'noted' | 'downloaded' | 'deleted'
+  action: 'uploaded' | 'tagged' | 'noted' | 'submitted' | 'downloaded' | 'deleted'
   actor: string
   createdAt: string
   memo?: string
@@ -152,7 +153,10 @@ const DATA_DIR = process.env.DATA_DIR || path.resolve('data')
 const DATA_FILE = path.join(DATA_DIR, 'dashboard.json')
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads')
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || (process.env.NODE_ENV === 'production' ? '' : 'admin1234')
-const adminTokens = new Set<string>()
+const APPROVER_PASSWORD = process.env.APPROVER_PASSWORD || ''
+const USER_PASSWORD = process.env.USER_PASSWORD || ''
+type UserRole = 'admin' | 'approver' | 'user'
+const sessions = new Map<string, UserRole>()
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true })
 app.use('/uploads', express.static(UPLOAD_DIR, {
@@ -164,10 +168,14 @@ app.use('/uploads', express.static(UPLOAD_DIR, {
 }))
 
 const readToken = (req: express.Request) => req.headers.authorization?.replace(/^Bearer\s+/i, '') || ''
-const requireAdmin = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  if (!adminTokens.has(readToken(req))) return res.status(401).json({ error: '관리자 인증이 필요합니다.' })
+const roleOf = (req: express.Request) => sessions.get(readToken(req))
+const requireRole = (roles: UserRole[]) => (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const role = roleOf(req)
+  if (!role || !roles.includes(role)) return res.status(401).json({ error: '권한이 필요합니다.' })
   next()
 }
+const requireAdmin = requireRole(['admin'])
+const requireApproverOrAdmin = requireRole(['admin', 'approver'])
 
 const persist = () => {
   fs.mkdirSync(DATA_DIR, { recursive: true })
@@ -245,18 +253,28 @@ app.get('/health', (_req, res) => {
 app.post('/auth/login', (req, res) => {
   if (!ADMIN_PASSWORD) return res.status(503).json({ error: 'ADMIN_PASSWORD가 설정되지 않았습니다.' })
   const supplied = String(req.body?.password || '')
-  const expected = Buffer.from(ADMIN_PASSWORD)
-  const actual = Buffer.from(supplied)
-  const valid = expected.length === actual.length && crypto.timingSafeEqual(expected, actual)
-  if (!valid) return res.status(401).json({ error: '관리자 비밀번호가 올바르지 않습니다.' })
+  const credentials: Array<{ role: UserRole; password: string }> = [
+    { role: 'admin', password: ADMIN_PASSWORD },
+    { role: 'approver', password: APPROVER_PASSWORD },
+    { role: 'user', password: USER_PASSWORD },
+  ].filter(item => item.password)
+  const matched = credentials.find(item => {
+    const expected = Buffer.from(item.password)
+    const actual = Buffer.from(supplied)
+    return expected.length === actual.length && crypto.timingSafeEqual(expected, actual)
+  })
+  if (!matched) return res.status(401).json({ error: '비밀번호가 올바르지 않습니다.' })
   const token = crypto.randomBytes(32).toString('hex')
-  adminTokens.add(token)
-  res.json({ token })
+  sessions.set(token, matched.role)
+  res.json({ token, role: matched.role })
 })
 
-app.get('/auth/session', (req, res) => res.json({ admin: adminTokens.has(readToken(req)) }))
-app.post('/auth/logout', requireAdmin, (req, res) => {
-  adminTokens.delete(readToken(req))
+app.get('/auth/session', (req, res) => {
+  const role = roleOf(req)
+  res.json({ admin: role === 'admin', role: role || null })
+})
+app.post('/auth/logout', (req, res) => {
+  sessions.delete(readToken(req))
   res.status(204).send()
 })
 
@@ -316,6 +334,11 @@ app.post('/backup/restore', requireAdmin, (req, res) => {
 
 app.use((req, res, next) => {
   const protectedResource = req.path.startsWith('/tasks') || req.path.startsWith('/team')
+  if (req.method === 'PATCH' && req.path.startsWith('/tasks/')) {
+    const approverFields = new Set(['approvalStage', 'approvalMemo', 'rejectionReason', 'approvedBy', 'approvedAt', 'approvalHistory'])
+    const keys = Object.keys(req.body || {})
+    if (keys.length && keys.every(key => approverFields.has(key))) return requireApproverOrAdmin(req, res, next)
+  }
   if (protectedResource && req.method !== 'GET') return requireAdmin(req, res, next)
   next()
 })
@@ -665,6 +688,75 @@ app.delete('/team/:name', (req, res) => {
   teamMembers.delete(name)
   persist()
   res.status(204).send()
+})
+
+const evidenceTagLabel: Record<string, string> = {
+  quote: '견적서',
+  receipt: '영수증',
+  inspection: '검수사진',
+  meeting: '회의사진',
+  siteVideo: '현장영상',
+  deliverable: '결과물',
+  other: '기타',
+}
+
+const safeZipSegment = (value: string) => cleanFileName(value).replace(/[\\/]+/g, '_') || 'item'
+
+app.get('/evidence-package.zip', requireAdmin, async (_req, res) => {
+  const evidenceFiles = Array.from(tasks.values()).flatMap(task => (task.attachments || []).map(attachment => ({ task, attachment })))
+  if (!evidenceFiles.length) return res.status(404).json({ error: 'ZIP으로 묶을 증빙 파일이 없습니다.' })
+
+  const zip = new JSZip()
+  const generatedAt = new Date().toISOString()
+  zip.file('00_제출표지/README.txt', [
+    'Conception Job Flow 증빙 제출 패키지',
+    `생성일: ${generatedAt}`,
+    `전체 증빙: ${evidenceFiles.length}`,
+    '이 ZIP은 서버에서 data/uploads 원본 파일을 기준으로 생성되었습니다.',
+  ].join('\n'))
+
+  const manifest = evidenceFiles.map(({ task, attachment }, index) => {
+    const sourceFileName = attachment.url?.startsWith('/uploads/') ? path.basename(attachment.url) : ''
+    const extension = path.extname(sourceFileName || attachment.name) || ''
+    const tag = attachment.tag || 'other'
+    const targetPath = `02_업무별증빙/${String(index + 1).padStart(3, '0')}_${safeZipSegment(task.name)}/${safeZipSegment(evidenceTagLabel[tag] || '기타')}_${safeZipSegment(attachment.name)}${extension && !attachment.name.endsWith(extension) ? extension : ''}`
+    return {
+      order: index + 1,
+      taskId: task.id,
+      taskName: task.name,
+      assignee: task.assignee || '미배정',
+      tag,
+      tagLabel: evidenceTagLabel[tag] || '기타',
+      submissionStatus: attachment.submissionStatus || 'pending',
+      note: attachment.note || '',
+      uploadedAt: attachment.uploadedAt,
+      size: attachment.size,
+      sourceFileName,
+      targetPath,
+    }
+  })
+
+  zip.file('01_증빙목록/manifest.json', JSON.stringify({ generatedAt, files: manifest }, null, 2))
+  zip.file('01_증빙목록/files.csv', [
+    '순번,업무명,담당자,태그,제출상태,크기,업로드일,저장경로',
+    ...manifest.map(file => `${file.order},"${file.taskName.replace(/"/g, '""')}","${file.assignee.replace(/"/g, '""')}","${file.tagLabel}","${file.submissionStatus}",${file.size},"${file.uploadedAt}","${file.targetPath.replace(/"/g, '""')}"`),
+  ].join('\n'))
+  zip.file('03_미제출점검/unsubmitted.json', JSON.stringify(manifest.filter(file => file.submissionStatus !== 'submitted'), null, 2))
+
+  for (const file of manifest) {
+    const filePath = path.resolve(UPLOAD_DIR, file.sourceFileName)
+    const uploadRoot = path.resolve(UPLOAD_DIR)
+    if (file.sourceFileName && filePath.startsWith(uploadRoot) && fs.existsSync(filePath)) {
+      zip.file(file.targetPath, fs.readFileSync(filePath))
+    } else {
+      zip.file(`${file.targetPath}.missing.txt`, `원본 파일을 찾지 못했습니다: ${file.sourceFileName}`)
+    }
+  }
+
+  const buffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } })
+  res.setHeader('Content-Type', 'application/zip')
+  res.setHeader('Content-Disposition', `attachment; filename="conception-evidence-package-${new Date().toISOString().slice(0, 10)}.zip"`)
+  res.send(buffer)
 })
 
 const distDir = path.resolve('dist')

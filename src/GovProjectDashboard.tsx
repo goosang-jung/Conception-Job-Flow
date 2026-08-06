@@ -262,6 +262,7 @@ export default function GovProjectDashboard() {
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [uploadingAttachment, setUploadingAttachment] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
+  const [userRole, setUserRole] = useState<'admin' | 'approver' | 'user' | null>(null)
   const [search, setSearch] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -293,6 +294,7 @@ export default function GovProjectDashboard() {
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const [isStandalone, setIsStandalone] = useState(window.matchMedia('(display-mode: standalone)').matches)
   const [showInstallGuide, setShowInstallGuide] = useState(false)
+  const canApprove = userRole === 'admin' || userRole === 'approver'
 
   const request = async (path: string, options?: RequestInit) => {
     const headers = new Headers(options?.headers)
@@ -537,6 +539,28 @@ export default function GovProjectDashboard() {
     }
   }
 
+  const downloadServerEvidenceZip = async () => {
+    if (!isAdmin) {
+      setShowLogin(true)
+      setError('서버 ZIP 생성은 관리자 인증 후 사용할 수 있습니다.')
+      return
+    }
+    try {
+      setNotice('서버에서 대용량 증빙 ZIP을 생성하는 중입니다.')
+      const res = await request('/evidence-package.zip')
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `conception-evidence-server-package-${todayKey}.zip`
+      link.click()
+      URL.revokeObjectURL(url)
+      setNotice('서버 기반 증빙 ZIP 파일을 생성했습니다.')
+    } catch {
+      setError('서버 ZIP 파일을 생성하지 못했습니다. 관리자 인증과 업로드 파일 상태를 확인해 주세요.')
+    }
+  }
+
   const renderTaskAttachments = (taskAttachments?: Attachment[], compact = false, task?: Task) => {
     if (!taskAttachments?.length) return null
     return (
@@ -606,13 +630,14 @@ export default function GovProjectDashboard() {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: adminPassword }),
       })
       if (!res.ok) throw new Error('login failed')
-      const { token } = await res.json()
+      const { token, role } = await res.json()
       localStorage.setItem('cjf-admin-token', token)
       setAdminToken(token)
-      setIsAdmin(true)
+      setUserRole(role || 'admin')
+      setIsAdmin(role === 'admin')
       setShowLogin(false)
       setAdminPassword('')
-      setNotice('관리자 인증에 성공했습니다.')
+      setNotice(`${role === 'approver' ? '결재자' : role === 'user' ? '일반 사용자' : '관리자'} 인증에 성공했습니다.`)
       const detailRes = await fetch(`${API_BASE}/personal-entries`, { headers: { Authorization: `Bearer ${token}` } })
       if (detailRes.ok) setPersonalEntries(await detailRes.json())
     } catch {
@@ -628,11 +653,14 @@ export default function GovProjectDashboard() {
       try {
         const res = await request('/auth/session')
         const session = await res.json()
-        if (!session.admin) throw new Error('expired')
-        setIsAdmin(true)
-        setNotice('관리자 모드로 전환했습니다.')
-        const details = await request('/personal-entries')
-        setPersonalEntries(await details.json())
+        if (!session.role) throw new Error('expired')
+        setUserRole(session.role)
+        setIsAdmin(session.role === 'admin')
+        setNotice(`${session.role === 'approver' ? '결재자' : session.role === 'user' ? '일반 사용자' : '관리자'} 모드로 전환했습니다.`)
+        if (session.role === 'admin') {
+          const details = await request('/personal-entries')
+          setPersonalEntries(await details.json())
+        }
       } catch {
         localStorage.removeItem('cjf-admin-token')
         setAdminToken('')
@@ -644,6 +672,7 @@ export default function GovProjectDashboard() {
     localStorage.removeItem('cjf-admin-token')
     setAdminToken('')
     setIsAdmin(false)
+    setUserRole(null)
     setNotice('관리자 모드에서 로그아웃했습니다.')
     const summary = await fetch(`${API_BASE}/personal-summary`)
     if (summary.ok) setPersonalEntries(await summary.json())
@@ -946,6 +975,18 @@ export default function GovProjectDashboard() {
     } catch {
       setError('결재 단계를 변경하지 못했습니다.')
     }
+  }
+
+  const draftApprovalMemo = (task: Task, mode: 'approve' | 'reject') => {
+    const amountTotal = (task.cashAmount ?? task.amount ?? 0) + (task.inKindAmount || 0)
+    const evidenceCount = task.attachments?.length || 0
+    const deadlineText = new Date(task.deadline).toLocaleDateString('ko-KR')
+    const categoryLabel = BUDGET_CATEGORIES.find(category => category.id === (task.budgetCategory || 'activity'))?.label || '연구활동비'
+    const memo = mode === 'approve'
+      ? `${task.name} 건은 ${categoryLabel} ${amountTotal}만원 규모이며, 마감일 ${deadlineText} 기준으로 집행 필요성이 확인됩니다. 첨부 증빙 ${evidenceCount}건을 기준으로 승인 처리하되, 제출 전 증빙 메모와 제출 상태를 최종 확인 바랍니다.`
+      : `${task.name} 건은 ${categoryLabel} ${amountTotal}만원 규모이나, 현재 증빙 ${evidenceCount}건으로 집행 근거 확인이 충분하지 않습니다. 견적서/영수증/검수사진/결과물 등 필수 증빙과 집행 사유를 보완한 뒤 재요청 바랍니다.`
+    setApprovalNotes(prev => ({ ...prev, [task.id]: memo }))
+    setNotice(`${mode === 'approve' ? '승인 메모' : '반려 사유'} AI 초안을 작성했습니다.`)
   }
 
   const handleAddTeamMember = async () => {
@@ -2329,7 +2370,7 @@ export default function GovProjectDashboard() {
                   <h3 className="text-xl font-bold text-slate-900 mt-1">권한 체계 운영 기준</h3>
                   <p className="text-sm text-slate-500 mt-2">현재 앱은 관리자 인증을 기준으로 위험 기능을 잠그고, 다음 단계에서 역할별 계정으로 확장할 수 있게 정리했습니다.</p>
                 </div>
-                <span className={`rounded-full px-3 py-2 text-xs font-bold ${isAdmin ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{isAdmin ? '관리자 모드 활성' : '일반 조회 모드'}</span>
+                <span className={`rounded-full px-3 py-2 text-xs font-bold ${userRole === 'admin' ? 'bg-emerald-50 text-emerald-700' : userRole === 'approver' ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700'}`}>{userRole === 'admin' ? '관리자 모드 활성' : userRole === 'approver' ? '결재자 모드 활성' : '일반 조회 모드'}</span>
               </div>
               <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-3">
                 {[
@@ -2346,9 +2387,9 @@ export default function GovProjectDashboard() {
                   </div>
                 ))}
               </div>
-              {!isAdmin && (
+              {userRole !== 'admin' && (
                 <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/70 p-4 text-sm text-amber-800">
-                  백업/복구, 삭제, 예산 수정, 결재 처리 같은 운영 위험 기능은 관리자 인증 후 사용할 수 있습니다.
+                  백업/복구, 삭제, 예산 수정은 관리자 인증 후 사용할 수 있습니다. 결재자는 결재 처리와 AI 메모 초안만 수행합니다.
                   <button type="button" onClick={() => setShowLogin(true)} className="ml-2 rounded-lg bg-amber-700 px-3 py-2 text-xs font-bold text-white">관리자 인증</button>
                 </div>
               )}
@@ -2424,7 +2465,7 @@ export default function GovProjectDashboard() {
                           <p className="mt-2 text-xs text-slate-400">아직 기록된 결재 이력이 없습니다.</p>
                         )}
                       </div>
-                      {isAdmin && (
+                      {canApprove && (
                         <div className="mt-3 space-y-2">
                           <label className="block text-xs font-semibold text-slate-500">
                             승인 메모 / 반려 사유
@@ -2438,12 +2479,16 @@ export default function GovProjectDashboard() {
                             />
                           </label>
                           <div className="grid grid-cols-2 gap-2">
+                            <button type="button" onClick={() => draftApprovalMemo(task, 'approve')} className="rounded-lg bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-700">AI 승인 메모</button>
+                            <button type="button" onClick={() => draftApprovalMemo(task, 'reject')} className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">AI 반려 사유</button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
                             <button type="button" onClick={() => handleApprovalStageChange(task, 'approved')} className="rounded-lg bg-teal-700 px-3 py-2 text-xs font-semibold text-white">승인</button>
                             <button type="button" onClick={() => handleApprovalStageChange(task, 'rejected')} className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">반려</button>
                             <button type="button" onClick={() => handleApprovalStageChange(task, 'paid')} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white">집행완료</button>
                             {currentStage === 'rejected'
                               ? <button type="button" onClick={() => handleApprovalStageChange(task, 'requested')} className="rounded-lg bg-amber-100 px-3 py-2 text-xs font-semibold text-amber-800">재요청</button>
-                              : <button type="button" onClick={() => { navigateToView('table'); startBudgetEdit(task) }} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-700 border border-slate-200">예산수정</button>}
+                              : isAdmin ? <button type="button" onClick={() => { navigateToView('table'); startBudgetEdit(task) }} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-700 border border-slate-200">예산수정</button> : <span className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-400 border border-slate-200 text-center">예산수정 관리자</span>}
                           </div>
                         </div>
                       )}
@@ -2763,6 +2808,7 @@ export default function GovProjectDashboard() {
                   <p className="text-sm text-slate-500 mt-2">제출 표지, 증빙 목록, 업무별 증빙 파일, 미제출 점검 목록을 하나의 ZIP으로 생성합니다.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => void downloadServerEvidenceZip()} className="rounded-xl bg-teal-700 px-4 py-3 text-sm font-bold text-white shadow-sm">서버 ZIP 다운로드</button>
                   <button type="button" onClick={() => void downloadEvidenceZip()} className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white shadow-sm">ZIP 다운로드</button>
                   <button type="button" onClick={() => downloadJson(`conception-evidence-package-manifest-${todayKey}.json`, evidencePackageManifest)} className="rounded-xl bg-indigo-50 px-4 py-3 text-sm font-bold text-indigo-700 border border-indigo-100">매니페스트 JSON</button>
                   <button type="button" onClick={() => downloadCsv(`conception-evidence-package-files-${todayKey}.csv`, evidencePackageManifest.files.map(file => ({ 순번: file.order, 업무명: file.taskName, 담당자: file.assignee, 태그: file.tag, 제출상태: file.submissionStatus, 저장경로: file.targetPath, 원본URL: file.sourceUrl })))} className="rounded-xl bg-white px-4 py-3 text-sm font-bold text-slate-700 border border-slate-200">파일목록 CSV</button>

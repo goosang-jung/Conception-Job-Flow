@@ -11,7 +11,9 @@
     "start": "tsx server.ts",
     "app:sync": "npm run build && cap sync android",
     "app:open": "cap open android",
-    "app:build": "npm run app:sync && cd android && gradlew assembleDebug"
+    "app:build": "npm run app:sync && cd android && gradlew assembleDebug",
+    "app:release:apk": "npm run app:sync && cd android && gradlew assembleRelease",
+    "app:release:aab": "npm run app:sync && cd android && gradlew bundleRelease"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",
