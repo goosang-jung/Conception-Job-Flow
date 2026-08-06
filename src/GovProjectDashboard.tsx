@@ -147,6 +147,8 @@ export default function GovProjectDashboard() {
   }>({ budgetCategory: 'labor', cashAmount: 0, inKindAmount: 0, amount: 0, approvalStage: 'requested' })
   const [approvalNotes, setApprovalNotes] = useState<Record<string, string>>({})
   const [approvalFilter, setApprovalFilter] = useState<'all' | NonNullable<Task['approvalStage']>>('all')
+  const [evidenceFilter, setEvidenceFilter] = useState<'all' | AttachmentTag | 'missing'>('all')
+  const [evidenceSearch, setEvidenceSearch] = useState('')
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [uploadingAttachment, setUploadingAttachment] = useState(false)
@@ -819,6 +821,17 @@ export default function GovProjectDashboard() {
   const approvalBottleneckAmount = approvalQueueTasks.reduce((sum, task) => sum + (task.cashAmount ?? task.amount ?? 0) + (task.inKindAmount || 0), 0)
   const paidBudgetAmount = budgetedTasks.filter(task => (task.approvalStage || '') === 'paid').reduce((sum, task) => sum + (task.cashAmount ?? task.amount ?? 0) + (task.inKindAmount || 0), 0)
   const evidenceReadyCount = budgetedTasks.filter(task => task.attachments?.length).length
+  const evidenceItems = tasks.flatMap(task => (task.attachments || []).map(attachment => ({ task, attachment })))
+  const missingEvidenceTasks = budgetedTasks.filter(task => !(task.attachments?.length))
+  const evidenceKeyword = evidenceSearch.trim().toLowerCase()
+  const filteredEvidenceItems = evidenceItems
+    .filter(({ task, attachment }) => evidenceFilter === 'all' || evidenceFilter === 'missing' || (attachment.tag || 'other') === evidenceFilter)
+    .filter(({ task, attachment }) => {
+      if (!evidenceKeyword) return true
+      return `${task.name} ${task.description} ${task.assignee || ''} ${attachment.name} ${attachment.note || ''}`.toLowerCase().includes(evidenceKeyword)
+    })
+    .sort((a, b) => new Date(b.attachment.uploadedAt).getTime() - new Date(a.attachment.uploadedAt).getTime())
+  const largeVideoEvidenceCount = evidenceItems.filter(({ attachment }) => attachment.type === 'video' && attachment.size >= 10 * 1024 * 1024).length
   const aiBudgetAlerts = [
     pendingBudgetApprovals.length ? `결재 대기 예산 ${pendingBudgetApprovals.length}건을 먼저 승인해야 합니다.` : '결재 대기 병목은 낮습니다.',
     evidenceReadyCount < budgetedTasks.length ? `증빙이 없는 예산 항목 ${budgetedTasks.length - evidenceReadyCount}건이 있습니다.` : '모든 예산 항목에 증빙이 연결되어 있습니다.',
@@ -1692,6 +1705,98 @@ export default function GovProjectDashboard() {
                 })}
                 {approvalFilteredTasks.length === 0 && <div className="xl:col-span-3 rounded-xl border border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">선택한 결재 단계의 항목이 없습니다.</div>}
               </div>
+            </section>
+
+            <section className="executive-card rounded-xl p-5">
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold text-teal-700">EVIDENCE LIBRARY</p>
+                  <h3 className="text-xl font-bold text-slate-900 mt-1">증빙 자료실</h3>
+                  <p className="text-sm text-slate-500 mt-2">전체 업무의 사진·동영상 증빙을 태그, 메모, 담당 업무 기준으로 모아 검토합니다.</p>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center min-w-full lg:min-w-[390px]">
+                  <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">전체 증빙</div><div className="text-xl font-bold text-slate-900">{evidenceItems.length}</div></div>
+                  <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">증빙 누락</div><div className="text-xl font-bold text-red-700">{missingEvidenceTasks.length}</div></div>
+                  <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">대용량 영상</div><div className="text-xl font-bold text-amber-700">{largeVideoEvidenceCount}</div></div>
+                </div>
+              </div>
+              <div className="mt-5 grid grid-cols-1 lg:grid-cols-[1fr_240px] gap-3">
+                <input
+                  aria-label="증빙 메모 검색"
+                  value={evidenceSearch}
+                  onChange={event => setEvidenceSearch(event.target.value)}
+                  placeholder="업무명, 담당자, 파일명, 증빙 메모로 검색"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                />
+                <select
+                  aria-label="증빙 태그 필터"
+                  value={evidenceFilter}
+                  onChange={event => setEvidenceFilter(event.target.value as typeof evidenceFilter)}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                >
+                  <option value="all">전체 증빙</option>
+                  <option value="missing">증빙 누락 업무</option>
+                  {ATTACHMENT_TAGS.filter(tag => tag.id !== 'other').map(tag => <option key={tag.id} value={tag.id}>{tag.label}</option>)}
+                  <option value="other">기타/미분류</option>
+                </select>
+              </div>
+              {evidenceFilter === 'missing' ? (
+                <div className="mt-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                  {missingEvidenceTasks.map(task => (
+                    <article key={task.id} className="rounded-xl border border-red-200 bg-red-50/80 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <h4 className="truncate font-bold text-slate-900">{task.name}</h4>
+                          <p className="mt-1 text-xs text-slate-500">{task.assignee || '미배정'} · {new Date(task.deadline).toLocaleDateString('ko-KR')}</p>
+                        </div>
+                        <span className="shrink-0 rounded-full bg-white px-2 py-1 text-xs font-bold text-red-700">증빙 누락</span>
+                      </div>
+                      <p className="mt-3 line-clamp-2 text-xs text-slate-600">{task.description}</p>
+                      <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-slate-500">
+                        <span className="rounded-full bg-white px-2 py-1">{BUDGET_CATEGORIES.find(category => category.id === (task.budgetCategory || 'activity'))?.label}</span>
+                        <span className="rounded-full bg-white px-2 py-1">{BUDGET_APPROVAL_LABELS[task.approvalStage || 'requested']}</span>
+                      </div>
+                    </article>
+                  ))}
+                  {missingEvidenceTasks.length === 0 && <div className="md:col-span-2 xl:col-span-3 rounded-xl border border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">증빙이 누락된 예산 업무가 없습니다.</div>}
+                </div>
+              ) : (
+                <div className="mt-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                  {filteredEvidenceItems.slice(0, 12).map(({ task, attachment }) => {
+                    const isLargeVideo = attachment.type === 'video' && attachment.size >= 10 * 1024 * 1024
+                    return (
+                      <article key={`${task.id}-${attachment.id}`} className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80">
+                        <a href={mediaUrl(attachment.url)} target="_blank" rel="noreferrer" className="block">
+                          <div className="aspect-video bg-slate-950">
+                            {attachment.type === 'image'
+                              ? <img src={mediaUrl(attachment.url)} alt={attachment.name} className="h-full w-full object-cover" />
+                              : <video src={mediaUrl(attachment.url)} className="h-full w-full object-cover" controls preload="metadata" />}
+                          </div>
+                        </a>
+                        <div className="space-y-3 p-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <h4 className="truncate text-sm font-bold text-slate-900">{attachment.name}</h4>
+                              <p className="mt-1 truncate text-xs text-slate-500">{task.name} · {task.assignee || '미배정'}</p>
+                            </div>
+                            <span className="shrink-0 rounded-full bg-white px-2 py-1 text-[11px] font-bold text-teal-700">{ATTACHMENT_TAGS.find(tag => tag.id === (attachment.tag || 'other'))?.label}</span>
+                          </div>
+                          {attachment.note && <p className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600">{attachment.note}</p>}
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
+                            <span>{new Date(attachment.uploadedAt).toLocaleDateString('ko-KR')} · {Math.round(attachment.size / 1024 / 1024 * 10) / 10}MB</span>
+                            {isLargeVideo && <span className="rounded-full bg-amber-100 px-2 py-1 font-bold text-amber-800">대용량 동영상</span>}
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <a href={mediaUrl(attachment.url)} download className="rounded-lg bg-white px-3 py-2 text-center text-xs font-bold text-teal-700 border border-slate-200">다운로드</a>
+                            <button type="button" onClick={() => { navigateToView('table'); startBudgetEdit(task) }} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white">업무 보기</button>
+                          </div>
+                        </div>
+                      </article>
+                    )
+                  })}
+                  {filteredEvidenceItems.length === 0 && <div className="md:col-span-2 xl:col-span-3 rounded-xl border border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">조건에 맞는 증빙 자료가 없습니다.</div>}
+                </div>
+              )}
             </section>
 
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
