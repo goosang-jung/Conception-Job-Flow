@@ -1,5 +1,7 @@
 # Conception Job Flow
 
+[![Build](https://github.com/goosang-jung/Conception-Job-Flow/actions/workflows/build.yml/badge.svg)](https://github.com/goosang-jung/Conception-Job-Flow/actions/workflows/build.yml)
+
 정부과제, 업무, 예산, 결재, 증빙, 인력 일정을 통합 관리하는 운영 대시보드입니다.
 
 ## 설치·운영 안내
