@@ -70,6 +70,15 @@ interface Attachment {
   uploadedAt: string
   tag?: 'quote' | 'receipt' | 'inspection' | 'meeting' | 'siteVideo' | 'deliverable' | 'other'
   note?: string
+  history?: EvidenceHistory[]
+}
+
+interface EvidenceHistory {
+  id: string
+  action: 'uploaded' | 'tagged' | 'noted' | 'downloaded' | 'deleted'
+  actor: string
+  createdAt: string
+  memo?: string
 }
 
 interface TeamMember {
@@ -415,6 +424,7 @@ app.post('/uploads', requireAdmin, (req, res) => {
     size: buffer.length,
     tag: 'other',
     note: '',
+    history: [{ id: uuidv4(), action: 'uploaded', actor: '관리자', createdAt: new Date().toISOString(), memo: safeName }],
     uploadedAt: new Date().toISOString(),
   }
   res.status(201).json(attachment)
@@ -431,7 +441,9 @@ app.patch('/tasks/:taskId/attachments/:attachmentId', requireAdmin, (req, res) =
     if (attachment.id !== attachmentId) return attachment
     const tag = typeof req.body?.tag === 'string' && allowedTags.has(req.body.tag) ? req.body.tag : attachment.tag
     const note = typeof req.body?.note === 'string' ? req.body.note.slice(0, 300) : attachment.note
-    return { ...attachment, tag, note }
+    const changedAction = tag !== attachment.tag ? 'tagged' : note !== attachment.note ? 'noted' : null
+    const history = changedAction ? [...(attachment.history || []), { id: uuidv4(), action: changedAction, actor: '관리자', createdAt: new Date().toISOString(), memo: changedAction === 'tagged' ? String(tag || '') : String(note || '') }] : attachment.history
+    return { ...attachment, tag, note, history }
   })
 
   if (!attachments.some(attachment => attachment.id === attachmentId)) return res.status(404).json({ error: 'Attachment not found' })

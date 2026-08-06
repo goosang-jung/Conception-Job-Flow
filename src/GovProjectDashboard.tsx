@@ -45,9 +45,18 @@ interface Attachment {
   uploadedAt: string
   tag?: AttachmentTag
   note?: string
+  history?: EvidenceHistory[]
 }
 
 type AttachmentTag = 'quote' | 'receipt' | 'inspection' | 'meeting' | 'siteVideo' | 'deliverable' | 'other'
+
+interface EvidenceHistory {
+  id: string
+  action: 'uploaded' | 'tagged' | 'noted' | 'downloaded' | 'deleted'
+  actor: string
+  createdAt: string
+  memo?: string
+}
 
 interface PersonalEntry {
   id: string
@@ -850,6 +859,32 @@ export default function GovProjectDashboard() {
     })
     .sort((a, b) => new Date(b.attachment.uploadedAt).getTime() - new Date(a.attachment.uploadedAt).getTime())
   const largeVideoEvidenceCount = evidenceItems.filter(({ attachment }) => attachment.type === 'video' && attachment.size >= 10 * 1024 * 1024).length
+  const evidenceSubmissionRows = budgetedTasks.map(task => {
+    const taskAttachments = task.attachments || []
+    const tags = new Set(taskAttachments.map(attachment => attachment.tag || 'other'))
+    const hasRequiredTag = ['quote', 'receipt', 'inspection', 'deliverable'].some(tag => tags.has(tag as AttachmentTag))
+    const hasMemo = taskAttachments.some(attachment => (attachment.note || '').trim().length > 0)
+    const readyScore = Math.round(((taskAttachments.length ? 35 : 0) + (hasRequiredTag ? 35 : 0) + (hasMemo ? 20 : 0) + (task.approvalStage === 'paid' ? 10 : 0)))
+    return { task, taskAttachments, tags, hasRequiredTag, hasMemo, readyScore }
+  })
+  const evidenceReadyForSubmission = evidenceSubmissionRows.filter(row => row.readyScore >= 70).length
+  const evidenceSubmissionRate = evidenceSubmissionRows.length ? Math.round((evidenceReadyForSubmission / evidenceSubmissionRows.length) * 100) : 0
+  const evidenceTagReadiness = ATTACHMENT_TAGS.filter(tag => tag.id !== 'other').map(tag => {
+    const count = evidenceItems.filter(({ attachment }) => attachment.tag === tag.id).length
+    return { ...tag, count, rate: evidenceItems.length ? Math.round((count / evidenceItems.length) * 100) : 0 }
+  })
+  const evidenceCsvRows = evidenceItems.map(({ task, attachment }) => ({
+    업무명: task.name,
+    담당자: task.assignee || '미배정',
+    결재단계: BUDGET_APPROVAL_LABELS[task.approvalStage || 'requested'],
+    태그: ATTACHMENT_TAGS.find(tag => tag.id === (attachment.tag || 'other'))?.label || '기타',
+    파일명: attachment.name,
+    유형: attachment.type === 'image' ? '이미지' : '동영상',
+    용량MB: Math.round(attachment.size / 1024 / 1024 * 10) / 10,
+    업로드일: new Date(attachment.uploadedAt).toLocaleString('ko-KR'),
+    메모: attachment.note || '',
+    URL: mediaUrl(attachment.url),
+  }))
   const approvalAuditLogs = tasks.flatMap(task => (task.approvalHistory || []).map(history => ({
     task,
     history,
@@ -1932,6 +1967,65 @@ export default function GovProjectDashboard() {
                   {filteredEvidenceItems.length === 0 && <div className="md:col-span-2 xl:col-span-3 rounded-xl border border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">조건에 맞는 증빙 자료가 없습니다.</div>}
                 </div>
               )}
+            </section>
+
+            <section className="executive-card rounded-xl p-5">
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold text-rose-700">EVIDENCE SUBMISSION AUDIT</p>
+                  <h3 className="text-xl font-bold text-slate-900 mt-1">증빙 제출 · 감사 대응 현황</h3>
+                  <p className="text-sm text-slate-500 mt-2">증빙 자료를 제출 가능한 목록으로 정리하고, 업무별 체크리스트와 태그별 제출 준비율을 확인합니다.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => downloadCsv(`conception-evidence-submission-${todayKey}.csv`, evidenceCsvRows)}
+                  className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white shadow-sm"
+                >
+                  증빙 목록 CSV 내보내기
+                </button>
+              </div>
+              <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">제출 준비율</div><div className="text-xl font-bold text-teal-700">{evidenceSubmissionRate}%</div></div>
+                <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">준비 완료</div><div className="text-xl font-bold text-slate-900">{evidenceReadyForSubmission}</div><div className="text-xs text-slate-400">업무</div></div>
+                <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">체크 대상</div><div className="text-xl font-bold text-amber-700">{evidenceSubmissionRows.length}</div><div className="text-xs text-slate-400">예산 업무</div></div>
+                <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">변경 이력 구조</div><div className="text-xl font-bold text-indigo-700">준비</div><div className="text-xs text-slate-400">history 필드</div></div>
+              </div>
+              <div className="mt-5 grid grid-cols-1 xl:grid-cols-3 gap-4">
+                <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                  <h4 className="text-sm font-bold text-slate-900">태그별 제출 준비율</h4>
+                  <div className="mt-3 space-y-3">
+                    {evidenceTagReadiness.map(row => (
+                      <div key={row.id}>
+                        <div className="mb-1 flex items-center justify-between text-xs"><span className="font-semibold text-slate-700">{row.label}</span><span className="text-slate-500">{row.count}개 · {row.rate}%</span></div>
+                        <div className="h-2 overflow-hidden rounded-full bg-slate-200"><div className="h-full rounded-full bg-gradient-to-r from-teal-700 to-rose-500" style={{ width: `${row.rate}%` }} /></div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="xl:col-span-2 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                  <h4 className="text-sm font-bold text-slate-900">업무별 증빙 체크리스트</h4>
+                  <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {evidenceSubmissionRows.slice(0, 8).map(row => (
+                      <article key={row.task.id} className="rounded-lg bg-white p-3 text-xs">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <strong className="block truncate text-sm text-slate-900">{row.task.name}</strong>
+                            <span className="text-slate-400">{row.task.assignee || '미배정'} · 증빙 {row.taskAttachments.length}개</span>
+                          </div>
+                          <span className={`shrink-0 rounded-full px-2 py-1 font-bold ${row.readyScore >= 70 ? 'bg-teal-50 text-teal-700' : 'bg-amber-50 text-amber-700'}`}>{row.readyScore}%</span>
+                        </div>
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                          <span className={`rounded-lg px-2 py-1 ${row.taskAttachments.length ? 'bg-teal-50 text-teal-700' : 'bg-red-50 text-red-700'}`}>파일 {row.taskAttachments.length ? '확보' : '누락'}</span>
+                          <span className={`rounded-lg px-2 py-1 ${row.hasRequiredTag ? 'bg-teal-50 text-teal-700' : 'bg-amber-50 text-amber-700'}`}>필수 태그 {row.hasRequiredTag ? '확인' : '필요'}</span>
+                          <span className={`rounded-lg px-2 py-1 ${row.hasMemo ? 'bg-teal-50 text-teal-700' : 'bg-amber-50 text-amber-700'}`}>메모 {row.hasMemo ? '작성' : '필요'}</span>
+                          <span className={`rounded-lg px-2 py-1 ${row.task.approvalStage === 'paid' ? 'bg-teal-50 text-teal-700' : 'bg-slate-100 text-slate-600'}`}>집행 {row.task.approvalStage === 'paid' ? '완료' : '대기'}</span>
+                        </div>
+                      </article>
+                    ))}
+                    {evidenceSubmissionRows.length === 0 && <div className="md:col-span-2 rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">체크할 예산 업무가 없습니다.</div>}
+                  </div>
+                </div>
+              </div>
             </section>
 
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
