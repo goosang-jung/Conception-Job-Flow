@@ -109,6 +109,14 @@ export default function GovProjectDashboard() {
   const [cashAmount, setCashAmount] = useState<number>(0)
   const [inKindAmount, setInKindAmount] = useState<number>(0)
   const [approvalStage, setApprovalStage] = useState<Task['approvalStage']>('requested')
+  const [editingBudgetTaskId, setEditingBudgetTaskId] = useState<string | null>(null)
+  const [budgetDraft, setBudgetDraft] = useState<{
+    budgetCategory: BudgetCategory
+    cashAmount: number
+    inKindAmount: number
+    amount: number
+    approvalStage: NonNullable<Task['approvalStage']>
+  }>({ budgetCategory: 'labor', cashAmount: 0, inKindAmount: 0, amount: 0, approvalStage: 'requested' })
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [uploadingAttachment, setUploadingAttachment] = useState(false)
@@ -478,6 +486,55 @@ export default function GovProjectDashboard() {
     }
   }
 
+  const startBudgetEdit = (task: Task) => {
+    setEditingBudgetTaskId(task.id)
+    setBudgetDraft({
+      budgetCategory: task.budgetCategory || 'activity',
+      cashAmount: task.cashAmount ?? task.amount ?? 0,
+      inKindAmount: task.inKindAmount || 0,
+      amount: task.amount || 0,
+      approvalStage: task.approvalStage || 'requested',
+    })
+  }
+
+  const handleBudgetSave = async (id: string) => {
+    try {
+      const totalAmount = budgetDraft.cashAmount + budgetDraft.inKindAmount
+      const res = await request(`/tasks/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          budgetCategory: budgetDraft.budgetCategory,
+          cashAmount: budgetDraft.cashAmount,
+          inKindAmount: budgetDraft.inKindAmount,
+          amount: totalAmount || budgetDraft.amount,
+          approvalStage: budgetDraft.approvalStage,
+        }),
+      })
+      const updated = await res.json()
+      setTasks(prev => prev.map(task => (task.id === id ? updated : task)))
+      setEditingBudgetTaskId(null)
+      setNotice('예산/결재 정보가 저장되었습니다.')
+    } catch {
+      setError('예산/결재 정보를 저장하지 못했습니다.')
+    }
+  }
+
+  const handleApprovalStageChange = async (id: string, approvalStage: NonNullable<Task['approvalStage']>) => {
+    try {
+      const res = await request(`/tasks/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approvalStage }),
+      })
+      const updated = await res.json()
+      setTasks(prev => prev.map(task => (task.id === id ? updated : task)))
+      setNotice(`결재 단계가 ${BUDGET_APPROVAL_LABELS[approvalStage]} 상태로 변경되었습니다.`)
+    } catch {
+      setError('결재 단계를 변경하지 못했습니다.')
+    }
+  }
+
   const handleAddTeamMember = async () => {
     if (!newTeamMember.trim()) return
 
@@ -628,6 +685,13 @@ export default function GovProjectDashboard() {
     return { ...category, tasks: categoryTasks, cash, inKind, total: cash + inKind, approved }
   })
   const pendingBudgetApprovals = budgetedTasks.filter(task => (task.approvalStage || 'requested') === 'requested')
+  const approvalQueueTasks = budgetedTasks
+    .filter(task => ['requested', 'rejected', 'draft'].includes(task.approvalStage || 'requested'))
+    .sort((a, b) => {
+      const stageWeight = { requested: 0, rejected: 1, draft: 2, approved: 3, paid: 4 } as Record<NonNullable<Task['approvalStage']>, number>
+      return (stageWeight[a.approvalStage || 'requested'] - stageWeight[b.approvalStage || 'requested']) || a.deadline.localeCompare(b.deadline)
+    })
+  const approvalReadyCount = approvalQueueTasks.filter(task => (task.attachments?.length || 0) > 0).length
   const paidBudgetAmount = budgetedTasks.filter(task => (task.approvalStage || '') === 'paid').reduce((sum, task) => sum + (task.cashAmount ?? task.amount ?? 0) + (task.inKindAmount || 0), 0)
   const evidenceReadyCount = budgetedTasks.filter(task => task.attachments?.length).length
   const aiBudgetAlerts = [
@@ -1212,7 +1276,33 @@ export default function GovProjectDashboard() {
                             task.difficulty || 2
                           ]}
                         </td>
-                        <td className="px-4 py-3 text-sm">{task.amount || 0}만원</td>
+                        <td className="px-4 py-3 text-sm min-w-[220px]">
+                          {editingBudgetTaskId === task.id ? (
+                            <div className="space-y-2">
+                              <select aria-label={`${task.name} 예산 세목 수정`} value={budgetDraft.budgetCategory} onChange={e => setBudgetDraft(prev => ({ ...prev, budgetCategory: e.target.value as BudgetCategory }))} className="w-full rounded-lg border px-2 py-1 text-xs">
+                                {BUDGET_CATEGORIES.map(category => <option key={category.id} value={category.id}>{category.label}</option>)}
+                              </select>
+                              <div className="grid grid-cols-2 gap-1">
+                                <input aria-label={`${task.name} 현금 수정`} type="number" min="0" value={budgetDraft.cashAmount} onChange={e => setBudgetDraft(prev => ({ ...prev, cashAmount: Number(e.target.value) }))} className="w-full rounded-lg border px-2 py-1 text-xs" />
+                                <input aria-label={`${task.name} 현물 수정`} type="number" min="0" value={budgetDraft.inKindAmount} onChange={e => setBudgetDraft(prev => ({ ...prev, inKindAmount: Number(e.target.value) }))} className="w-full rounded-lg border px-2 py-1 text-xs" />
+                              </div>
+                              <select aria-label={`${task.name} 결재 단계 수정`} value={budgetDraft.approvalStage} onChange={e => setBudgetDraft(prev => ({ ...prev, approvalStage: e.target.value as NonNullable<Task['approvalStage']> }))} className="w-full rounded-lg border px-2 py-1 text-xs">
+                                {Object.entries(BUDGET_APPROVAL_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                              </select>
+                              <div className="flex gap-1">
+                                <button type="button" onClick={() => handleBudgetSave(task.id)} className="flex-1 rounded-lg bg-teal-700 px-2 py-1 text-xs font-semibold text-white">저장</button>
+                                <button type="button" onClick={() => setEditingBudgetTaskId(null)} className="flex-1 rounded-lg bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">취소</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div>
+                              <div className="font-semibold text-slate-900">{(task.cashAmount ?? task.amount ?? 0) + (task.inKindAmount || 0)}만원</div>
+                              <div className="mt-1 text-xs text-slate-500">{BUDGET_CATEGORIES.find(category => category.id === (task.budgetCategory || 'activity'))?.label} · 현금 {task.cashAmount ?? task.amount ?? 0} · 현물 {task.inKindAmount || 0}</div>
+                              <div className="mt-1 inline-flex rounded-full bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">{BUDGET_APPROVAL_LABELS[task.approvalStage || 'requested']}</div>
+                              {isAdmin && <button type="button" onClick={() => startBudgetEdit(task)} className="ml-2 text-xs font-semibold text-teal-700">수정</button>}
+                            </div>
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-center">
                           {isAdmin ? <div className="flex items-center justify-center gap-2">
                           <select aria-label={`${task.name} 상태`} value={task.status} onChange={e => handleStatusChange(task.id, e.target.value as Task['status'])} className="text-xs border rounded px-2 py-1">
@@ -1357,6 +1447,51 @@ export default function GovProjectDashboard() {
                 </div>
               </div>
             </div>
+
+            <section className="executive-card rounded-xl p-5">
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold text-amber-700">APPROVAL CONTROL</p>
+                  <h3 className="text-xl font-bold text-slate-900 mt-1">결재 대기 패널</h3>
+                  <p className="text-sm text-slate-500 mt-2">결재요청, 반려, 작성 상태의 예산 항목만 모아 승인 병목과 증빙 준비 상태를 빠르게 판단합니다.</p>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center min-w-full lg:min-w-[360px]">
+                  <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">처리 대상</div><div className="text-xl font-bold text-amber-700">{approvalQueueTasks.length}</div></div>
+                  <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">증빙 준비</div><div className="text-xl font-bold text-teal-700">{approvalReadyCount}</div></div>
+                  <div className="executive-card-subtle rounded-lg p-3"><div className="text-xs text-slate-500">증빙 누락</div><div className="text-xl font-bold text-red-700">{Math.max(approvalQueueTasks.length - approvalReadyCount, 0)}</div></div>
+                </div>
+              </div>
+              <div className="mt-5 grid grid-cols-1 xl:grid-cols-3 gap-3">
+                {approvalQueueTasks.slice(0, 6).map(task => {
+                  const taskBudgetTotal = (task.cashAmount ?? task.amount ?? 0) + (task.inKindAmount || 0)
+                  return (
+                    <article key={task.id} className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <h4 className="font-bold text-slate-900 truncate">{task.name}</h4>
+                          <p className="text-xs text-slate-500 mt-1">{task.assignee || '미배정'} · {BUDGET_CATEGORIES.find(category => category.id === (task.budgetCategory || 'activity'))?.label}</p>
+                        </div>
+                        <span className="shrink-0 rounded-full bg-white px-2 py-1 text-xs font-semibold text-amber-700">{BUDGET_APPROVAL_LABELS[task.approvalStage || 'requested']}</span>
+                      </div>
+                      <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                        <div className="rounded-lg bg-white p-2"><span className="block text-slate-400">금액</span><strong>{taskBudgetTotal}만원</strong></div>
+                        <div className="rounded-lg bg-white p-2"><span className="block text-slate-400">마감</span><strong>{new Date(task.deadline).toLocaleDateString('ko-KR')}</strong></div>
+                        <div className="rounded-lg bg-white p-2"><span className="block text-slate-400">증빙</span><strong>{task.attachments?.length || 0}개</strong></div>
+                      </div>
+                      {isAdmin && (
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                          <button type="button" onClick={() => handleApprovalStageChange(task.id, 'approved')} className="rounded-lg bg-teal-700 px-3 py-2 text-xs font-semibold text-white">승인</button>
+                          <button type="button" onClick={() => handleApprovalStageChange(task.id, 'rejected')} className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">반려</button>
+                          <button type="button" onClick={() => handleApprovalStageChange(task.id, 'paid')} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white">집행완료</button>
+                          <button type="button" onClick={() => { navigateToView('table'); startBudgetEdit(task) }} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-700 border border-slate-200">예산수정</button>
+                        </div>
+                      )}
+                    </article>
+                  )
+                })}
+                {approvalQueueTasks.length === 0 && <div className="xl:col-span-3 rounded-xl border border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">현재 결재 대기 항목이 없습니다.</div>}
+              </div>
+            </section>
 
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
               <section className="executive-card rounded-xl p-5 xl:col-span-2">
