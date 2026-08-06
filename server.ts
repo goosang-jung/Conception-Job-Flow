@@ -68,6 +68,8 @@ interface Attachment {
   mimeType: string
   size: number
   uploadedAt: string
+  tag?: 'quote' | 'receipt' | 'inspection' | 'meeting' | 'siteVideo' | 'deliverable' | 'other'
+  note?: string
 }
 
 interface TeamMember {
@@ -411,9 +413,57 @@ app.post('/uploads', requireAdmin, (req, res) => {
     type,
     mimeType: String(mimeType),
     size: buffer.length,
+    tag: 'other',
+    note: '',
     uploadedAt: new Date().toISOString(),
   }
   res.status(201).json(attachment)
+})
+
+// PATCH /tasks/:taskId/attachments/:attachmentId
+app.patch('/tasks/:taskId/attachments/:attachmentId', requireAdmin, (req, res) => {
+  const { taskId, attachmentId } = req.params
+  const task = tasks.get(taskId)
+  if (!task) return res.status(404).json({ error: 'Task not found' })
+
+  const allowedTags = new Set(['quote', 'receipt', 'inspection', 'meeting', 'siteVideo', 'deliverable', 'other'])
+  const attachments = (task.attachments || []).map(attachment => {
+    if (attachment.id !== attachmentId) return attachment
+    const tag = typeof req.body?.tag === 'string' && allowedTags.has(req.body.tag) ? req.body.tag : attachment.tag
+    const note = typeof req.body?.note === 'string' ? req.body.note.slice(0, 300) : attachment.note
+    return { ...attachment, tag, note }
+  })
+
+  if (!attachments.some(attachment => attachment.id === attachmentId)) return res.status(404).json({ error: 'Attachment not found' })
+
+  const updated = { ...task, attachments }
+  tasks.set(taskId, updated)
+  persist()
+  res.json(updated)
+})
+
+// DELETE /tasks/:taskId/attachments/:attachmentId
+app.delete('/tasks/:taskId/attachments/:attachmentId', requireAdmin, (req, res) => {
+  const { taskId, attachmentId } = req.params
+  const task = tasks.get(taskId)
+  if (!task) return res.status(404).json({ error: 'Task not found' })
+
+  const target = (task.attachments || []).find(attachment => attachment.id === attachmentId)
+  if (!target) return res.status(404).json({ error: 'Attachment not found' })
+
+  if (target.url?.startsWith('/uploads/')) {
+    const fileName = path.basename(target.url)
+    const filePath = path.resolve(UPLOAD_DIR, fileName)
+    const uploadRoot = path.resolve(UPLOAD_DIR)
+    if (filePath.startsWith(uploadRoot)) {
+      try { fs.unlinkSync(filePath) } catch { /* 파일이 이미 없으면 업무 연결만 정리 */ }
+    }
+  }
+
+  const updated = { ...task, attachments: (task.attachments || []).filter(attachment => attachment.id !== attachmentId) }
+  tasks.set(taskId, updated)
+  persist()
+  res.json(updated)
 })
 
 // POST /upload-image (데이터 URL 저장)

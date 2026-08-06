@@ -43,7 +43,11 @@ interface Attachment {
   mimeType: string
   size: number
   uploadedAt: string
+  tag?: AttachmentTag
+  note?: string
 }
+
+type AttachmentTag = 'quote' | 'receipt' | 'inspection' | 'meeting' | 'siteVideo' | 'deliverable' | 'other'
 
 interface PersonalEntry {
   id: string
@@ -99,6 +103,16 @@ const BUDGET_CATEGORIES: Array<{ id: BudgetCategory; label: string; description:
 ]
 
 const BUDGET_APPROVAL_LABELS = { draft: '작성', requested: '결재요청', approved: '승인', paid: '집행완료', rejected: '반려' } as const
+
+const ATTACHMENT_TAGS: Array<{ id: AttachmentTag; label: string }> = [
+  { id: 'quote', label: '견적서' },
+  { id: 'receipt', label: '영수증' },
+  { id: 'inspection', label: '검수사진' },
+  { id: 'meeting', label: '회의사진' },
+  { id: 'siteVideo', label: '현장영상' },
+  { id: 'deliverable', label: '결과물' },
+  { id: 'other', label: '기타' },
+]
 
 export default function GovProjectDashboard() {
   const [tasks, setTasks] = useState<Task[]>([])
@@ -218,25 +232,91 @@ export default function GovProjectDashboard() {
     setAttachments(prev => prev.filter(attachment => attachment.id !== id))
   }
 
-  const renderTaskAttachments = (taskAttachments?: Attachment[], compact = false) => {
+  const updatePendingAttachment = (id: string, patch: Partial<Pick<Attachment, 'tag' | 'note'>>) => {
+    setAttachments(prev => prev.map(attachment => attachment.id === id ? { ...attachment, ...patch } : attachment))
+  }
+
+  const updateTaskAttachment = async (task: Task, attachmentId: string, patch: Partial<Pick<Attachment, 'tag' | 'note'>>) => {
+    try {
+      const res = await request(`/tasks/${task.id}/attachments/${attachmentId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+      const updated = await res.json()
+      setTasks(prev => prev.map(item => item.id === task.id ? updated : item))
+      setNotice('첨부파일 정보가 업데이트되었습니다.')
+    } catch {
+      setError('첨부파일 정보를 수정하지 못했습니다.')
+    }
+  }
+
+  const deleteTaskAttachment = async (task: Task, attachmentId: string) => {
+    if (!window.confirm('이 첨부파일을 삭제할까요? 저장된 파일과 업무 연결이 함께 정리됩니다.')) return
+    try {
+      const res = await request(`/tasks/${task.id}/attachments/${attachmentId}`, { method: 'DELETE' })
+      const updated = await res.json()
+      setTasks(prev => prev.map(item => item.id === task.id ? updated : item))
+      setNotice('첨부파일이 삭제되었습니다.')
+    } catch {
+      setError('첨부파일을 삭제하지 못했습니다.')
+    }
+  }
+
+  const renderTaskAttachments = (taskAttachments?: Attachment[], compact = false, task?: Task) => {
     if (!taskAttachments?.length) return null
     return (
       <div className={`mt-3 grid ${compact ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-3'} gap-2`}>
         {taskAttachments.slice(0, compact ? 3 : 6).map(attachment => (
-          <a
+          <div
             key={attachment.id}
-            href={mediaUrl(attachment.url)}
-            target="_blank"
-            rel="noreferrer"
             className="group overflow-hidden rounded-xl border border-slate-200 bg-slate-50"
           >
-            <div className="aspect-video bg-slate-900">
-              {attachment.type === 'image'
-                ? <img src={mediaUrl(attachment.url)} alt={attachment.name} className="h-full w-full object-cover transition-transform group-hover:scale-105" />
-                : <video src={mediaUrl(attachment.url)} className="h-full w-full object-cover" controls={!compact} preload="metadata" />}
-            </div>
-            {!compact && <div className="truncate px-2 py-1 text-[11px] text-slate-500">{attachment.name}</div>}
-          </a>
+            <a href={mediaUrl(attachment.url)} target="_blank" rel="noreferrer" className="block">
+              <div className="aspect-video bg-slate-900">
+                {attachment.type === 'image'
+                  ? <img src={mediaUrl(attachment.url)} alt={attachment.name} className="h-full w-full object-cover transition-transform group-hover:scale-105" />
+                  : <video src={mediaUrl(attachment.url)} className="h-full w-full object-cover" controls={!compact} preload="metadata" />}
+              </div>
+            </a>
+            {!compact && (
+              <div className="space-y-2 px-2 py-2 text-[11px] text-slate-500">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate font-semibold text-slate-700">{attachment.name}</span>
+                  <a href={mediaUrl(attachment.url)} download className="shrink-0 font-bold text-teal-700">다운로드</a>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="rounded-full bg-white px-2 py-1 font-semibold text-slate-600">{ATTACHMENT_TAGS.find(tag => tag.id === attachment.tag)?.label || '미분류'}</span>
+                  {attachment.note && <span className="truncate text-slate-400">{attachment.note}</span>}
+                </div>
+                {isAdmin && task && (
+                  <div className="space-y-2">
+                    <select
+                      aria-label={`${attachment.name} 태그`}
+                      value={attachment.tag || 'other'}
+                      onChange={event => void updateTaskAttachment(task, attachment.id, { tag: event.target.value as AttachmentTag })}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+                    >
+                      {ATTACHMENT_TAGS.map(tag => <option key={tag.id} value={tag.id}>{tag.label}</option>)}
+                    </select>
+                    <input
+                      aria-label={`${attachment.name} 설명 메모`}
+                      value={attachment.note || ''}
+                      onChange={event => void updateTaskAttachment(task, attachment.id, { note: event.target.value })}
+                      placeholder="증빙 설명 메모"
+                      className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+                    />
+                    <button type="button" onClick={() => void deleteTaskAttachment(task, attachment.id)} className="w-full rounded-lg bg-red-50 px-2 py-1 text-xs font-bold text-red-700">첨부 삭제</button>
+                  </div>
+                )}
+              </div>
+            )}
+            {compact && (
+              <div className="px-2 py-1 text-[10px] font-semibold text-slate-500">
+                {ATTACHMENT_TAGS.find(tag => tag.id === attachment.tag)?.label || '미분류'}
+              </div>
+            )}
+          </div>
         ))}
         {taskAttachments.length > (compact ? 3 : 6) && <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-2 text-xs text-slate-500">+{taskAttachments.length - (compact ? 3 : 6)}개</div>}
       </div>
@@ -1126,6 +1206,23 @@ export default function GovProjectDashboard() {
                             <span className="min-w-0 truncate text-xs text-slate-600">{attachment.name}</span>
                             <button type="button" onClick={() => removeAttachment(attachment.id)} className="shrink-0 text-xs font-semibold text-red-600">삭제</button>
                           </div>
+                          <div className="mt-2 grid grid-cols-1 gap-2">
+                            <select
+                              aria-label={`${attachment.name} 증빙 태그`}
+                              value={attachment.tag || 'other'}
+                              onChange={event => updatePendingAttachment(attachment.id, { tag: event.target.value as AttachmentTag })}
+                              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700"
+                            >
+                              {ATTACHMENT_TAGS.map(tag => <option key={tag.id} value={tag.id}>{tag.label}</option>)}
+                            </select>
+                            <input
+                              aria-label={`${attachment.name} 증빙 메모`}
+                              value={attachment.note || ''}
+                              onChange={event => updatePendingAttachment(attachment.id, { note: event.target.value })}
+                              placeholder="증빙 설명 메모"
+                              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700"
+                            />
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -1262,7 +1359,9 @@ export default function GovProjectDashboard() {
                 {visibleTasks.map(task => <article key={task.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
                   <div className="flex items-start justify-between gap-3"><div className="min-w-0"><h3 className="font-bold text-gray-900 break-words">{task.name}</h3><p className="text-sm text-gray-500 mt-1 line-clamp-2 break-words">{task.description}</p></div><span className="shrink-0 text-xs px-2 py-1 rounded-full bg-violet-100 text-violet-700">{{pending:'대기','in-progress':'진행',review:'검토',blocked:'보류',completed:'완료'}[task.status]}</span></div>
                   <div className="grid grid-cols-2 gap-2 mt-4 text-xs"><div className="bg-gray-50 rounded-lg p-2"><span className="text-gray-400 block">마감</span>{new Date(task.deadline).toLocaleDateString('ko-KR')}</div><div className="bg-gray-50 rounded-lg p-2"><span className="text-gray-400 block">담당자</span>{task.assignee || '미배정'}</div><div className="bg-gray-50 rounded-lg p-2"><span className="text-gray-400 block">프로젝트</span>{PROJECT_TYPES.find(p => p.id === task.project)?.label || '미분류'}</div><div className="bg-gray-50 rounded-lg p-2"><span className="text-gray-400 block">예상 기간</span>{task.estimatedDays || 0}일</div></div>
-                  {renderTaskAttachments(task.attachments, true)}
+                  {task.attachments?.length
+                    ? renderTaskAttachments(task.attachments, !isAdmin, task)
+                    : <div className="mt-3 rounded-xl border border-dashed border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">증빙 누락 · 사진/동영상 자료를 연결해야 합니다.</div>}
                   {isAdmin && <select aria-label={`${task.name} 모바일 상태`} value={task.status} onChange={e => handleStatusChange(task.id, e.target.value as Task['status'])} className="mt-3 w-full border rounded-xl px-3 py-2 text-sm"><option value="pending">대기</option><option value="in-progress">진행 중</option><option value="review">검토/승인</option><option value="blocked">보류/차단</option><option value="completed">완료</option></select>}
                 </article>)}
                 {visibleTasks.length === 0 && <div className="bg-white rounded-2xl p-10 text-center text-gray-500">조건에 맞는 업무가 없습니다.</div>}
@@ -1286,7 +1385,9 @@ export default function GovProjectDashboard() {
                         <td className="px-4 py-3">
                           <div className="font-medium">{task.name}</div>
                           <div className="text-xs text-gray-500 truncate">{task.description}</div>
-                          {task.attachments?.length ? <div className="mt-2"><span className="inline-flex rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600">첨부 {task.attachments.length}개</span>{renderTaskAttachments(task.attachments, true)}</div> : null}
+                          {task.attachments?.length
+                            ? <div className="mt-2"><span className="inline-flex rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600">첨부 {task.attachments.length}개</span>{renderTaskAttachments(task.attachments, !isAdmin, task)}</div>
+                            : <div className="mt-2 inline-flex rounded-full bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-700">증빙 누락</div>}
                         </td>
                         <td className="px-4 py-3 text-sm">
                           <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-medium">
